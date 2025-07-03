@@ -92,7 +92,12 @@ def gdrive_sync_check(resource_id, resource_state, local):
         
         # Récupère le dernier startPageToken connu pour cette ressource spécifique.
         # C'est le point de départ à partir duquel nous voulons lister les nouveaux changements.
-        last_token = load_startpagetoken(resource_id, local)[resource_id].get('token')
+        last_token = load_startpagetoken(resource_id, local)
+        
+        try:
+            last_token = last_token[resource_id].get('token')
+        except KeyError:
+            pass
 
         if not last_token:
             logging.warning(f"Aucun startPageToken précédent trouvé pour la ressource {resource_id}. Tentative de récupération du token actuel.")
@@ -227,7 +232,7 @@ if __name__ == '__main__':
         local = True
 
     if local:
-        app.run(host="0.0.0.0", port=5000, debug=True)
+        app.run(host="0.0.0.0", port=8080, debug=True)
     else:
         port = int(os.environ.get("PORT", 8080))
         app.run(host="0.0.0.0", port=port)
