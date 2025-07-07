@@ -10,8 +10,7 @@ from dotenv import load_dotenv
 import datetime
 import threading
 import io
-import time
-import shutil
+from ast import literal_eval
 from functions.watermark import Watermark
 
 
@@ -205,26 +204,57 @@ def gdrive_sync_check(resource_id, resource_state, local):
                     # mettre à jour une base de données, ou lancer un autre processus.
 
                     if not file_info.get('trashed'):
-                        download = download_file(drive_service, file_id, destination_path=FILE_SAVE_PATH + file_info.get('name'), expected_file_size=file_size)
+                        if file_info.get('name') == 'settings.json':
+                            logging.info(f"Fichier de configuration détecté : {file_info.get('name')}. Téléchargement de ce fichier.")
+                            
+                            path_file = os.getcwd() + '/settings/' + file_info.get('name')
+                            watermark = False
+                        else:
+                            path_file = FILE_SAVE_PATH + file_info.get('name')
+                            watermark = True
+
+                            # Check si le fichier settings.json existe pour appliquer le watermark. Sinon, on le télécharge.
+                            path_settings = os.getcwd() + '/settings/settings.json'
+
+                            if not os.path.exists(path_settings):
+                                logging.error("Le fichier settings.json est introuvable. Téléchargerment du fichier setting.json.")
+                                watermark = False
+
+                                settings_file = drive_service.files().list(
+                                    q="mimeType='application/json'",
+                                    spaces="drive",
+                                    fields="nextPageToken, files(id, name, size)",
+                                    pageToken=None,
+                                ).execute()
+
+                                settings_file_id = settings_file.get('files', [])[0].get('id')
+                                settings_file_size = settings_file.get('files', [])[0].get('size')
+
+                                download_file(drive_service, settings_file_id, destination_path=path_settings, expected_file_size=settings_file_size)
+
+                        download = download_file(drive_service, file_id, destination_path=path_file, expected_file_size=file_size)
 
                         if download:
                             logging.info(f"Fichier {file_id} téléchargé en mémoire. Taille: {len(download)} bytes.")
 
-                            logging.info(f"Application du watermark sur le fichier {file_info.get('name')}...")
+                            if watermark:
+                                logging.info(f"Application du watermark sur le fichier {file_info.get('name')}...")
 
-                            time.sleep(1)  # Pause pour s'assurer que le fichier est complètement écrit avant de l'utiliser.
+                                with open(os.getcwd() + '/settings/settings.json', 'r') as file:
+                                    settings = json.load(file)
 
-                            wtmrk = Watermark(
-                                path=FILE_SAVE_PATH + file_info.get('name'),
-                                path_logo=os.getenv('LOGO_PATH'),  # Chemin par défaut pour le logo
-                                colors=(255, 255, 255),  # Couleur blanche par défaut
-                                opacity=50  # Opacité par défaut
-                            )
+                                wtmrk = Watermark(
+                                    path=FILE_SAVE_PATH + file_info.get('name'),
+                                    path_logo=os.getenv('LOGO_PATH'),  # Chemin par défaut pour le logo
+                                    colors=literal_eval(settings['colors']),  # Couleur blanche par défaut
+                                    opacity=settings['opacity']  # Opacité par défaut
+                                )
 
-                            # Applique le watermark sur le fichier téléchargé.
-                            # Note: Assurez-vous que le fichier est un type d'image supporté par PIL
-                            wtmrk.img_watermark()
-                            logging.info(f"Watermark appliqué sur le fichier {file_info.get('name')}.")
+                                # Applique le watermark sur le fichier téléchargé.
+                                # Note: Assurez-vous que le fichier est un type d'image supporté par PIL
+                                wtmrk.img_watermark()
+
+                                logging.info(f"Watermark appliqué sur le fichier {file_info.get('name')}.")
 
                         else:
                             logging.error(f"Échec du téléchargement du fichier {file_id}.")

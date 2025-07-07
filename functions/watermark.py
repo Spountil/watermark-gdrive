@@ -204,8 +204,8 @@ class Watermark():
 if __name__ == '__main__':
     colors = (255, 255, 255)
     opacity = 50
-    folder_path = '/Users/ramanaalwardi/Desktop/repo/watermark-gdrive/downloaded_files/Berger.jpg'
-    logo_path = '/Users/ramanaalwardi/Desktop/repo/watermark-gdrive/downloaded_files/logo.png'
+    folder_path = ''
+    logo_path = ''
     
     wtmrk = Watermark(folder_path, logo_path, colors, opacity)
     wtmrk.img_watermark()
