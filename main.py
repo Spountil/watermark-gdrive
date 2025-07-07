@@ -7,6 +7,7 @@ import json
 import logging
 from dotenv import load_dotenv
 import datetime
+import threading
 
 
 logging.basicConfig(level=logging.INFO)
@@ -80,45 +81,12 @@ def get_drive_service_for_webhook_receiver(local):
     return drive_service_receiver
 
 
-@app.route('/webhook', methods=['POST'])
-def webhook():
-
-    # --- 1. Confirmer la réception immédiatement (Réponse 200 OK) ---
-    # Il est essentiel de répondre rapidement pour éviter que Google ne ré-essaie ou ne désactive le webhook.
-    # On prépare une réponse par défaut qui sera envoyée.
-    response_data = {"status": "received", "message": "Processing in background"}
-    status_code = 200 # Le statut HTTP par défaut est 200 OK.
-
-    # --- Récupérer les en-têtes (informations clés de la notification) ---
-    # Les informations cruciales sont dans les en-têtes HTTP de la requête POST, le corps est souvent vide.
-    channel_id = request.headers.get('X-Goog-Channel-ID')     # L'ID du canal que vous avez créé.
-    resource_id = request.headers.get('X-Goog-Resource-ID')   # L'ID de la ressource Drive surveillée (fichier ou Shared Drive).
-    resource_state = request.headers.get('X-Goog-Resource-State') # L'état de la ressource (ex: 'change', 'sync', 'trash').
-    channel_token = request.headers.get('X-Goog-Channel-Token') # Le token secret que vous avez fourni lors de la création.
-    message_number = request.headers.get('X-Goog-Message-Number') # Numéro de message incrémental pour le canal.
-
-    print(resource_id)
-    
-    logging.info(f"Webhook Headers: ChannelID={channel_id}, ResourceID={resource_id}, State={resource_state}, Token={channel_token}, MsgNum={message_number}")
-    # Décoder le corps de la requête. Il est souvent vide ou contient des données non-JSON importantes pour certains types d'événements.
-    logging.info(f"Webhook Body (usually empty): {request.data.decode('utf-8', errors='ignore')}")
-
-    # --- 2. Vérifier l'authenticité ---
-    # Cette étape est cruciale pour s'assurer que la notification provient bien de Google et non d'une source malveillante.
-    if not os.environ.get('CHANNEL_TOKEN') or channel_token != os.environ.get('CHANNEL_TOKEN'):
-        logging.error(f"Erreur de sécurité: X-Goog-Channel-Token incorrect. Attendu: '{os.environ.get('CHANNEL_TOKEN')}', Reçu: '{channel_token}'")
-        response_data = {"error": "Unauthorized webhook token"}
-        status_code = 403 # Retourne un statut 403 Forbidden si le token ne correspond pas.
-        return jsonify(response_data), status_code
-
-    # Les notifications de type 'sync' sont des pings de Google pour confirmer que le canal est actif.
-    # Elles ne contiennent pas de changements réels et ne nécessitent pas d'interroger l'API Drive.
-    if resource_state == 'sync':
-        logging.info("Webhook de synchronisation/confirmation reçu. Pas de traitement des changements à ce stade.")
-        return jsonify({"status": "sync_acknowledged"}), 200
-
+def gdrive_sync_check(resource_id, resource_state, local):
     # --- 3. Traiter la notification (récupérer les détails des changements) ---
     # Le corps de la notification webhook est généralement vide ; les détails des changements doivent être récupérés via l'API Drive.
+    
+    logging.info(f"Début du traitement asynchrone pour la ressource : {resource_id}, état : {resource_state}")
+
     try:
         drive_service = get_drive_service_for_webhook_receiver(local)
         
@@ -159,6 +127,9 @@ def webhook():
         new_start_page_token = results.get('newStartPageToken') # Le token à utiliser pour la prochaine requête `list()`
 
         if changes:
+            with open('response.json', 'w') as f:
+                json.dump(changes, f)
+                
             logging.info(f"Nombre de changements détectés : {len(changes)}")
             for change in changes:
                 file_id = change.get('fileId')
@@ -190,8 +161,57 @@ def webhook():
         # renvoyer un statut 200 OK à Google pour éviter qu'il ne considère le webhook comme défaillant.
         logging.error(f"Erreur lors du traitement du webhook pour ressource {resource_id}: {e}", exc_info=True)
         response_data = {"status": "processed_with_error", "error": str(e)}
+    finally:
+        logging.info(f"Fin du traitement asynchrone pour la ressource : {resource_id}")
 
+
+
+@app.route('/webhook', methods=['POST'])
+def webhook():
+
+    # --- 1. Confirmer la réception immédiatement (Réponse 200 OK) ---
+    # Il est essentiel de répondre rapidement pour éviter que Google ne ré-essaie ou ne désactive le webhook.
+    # On prépare une réponse par défaut qui sera envoyée.
+    response_data = {"status": "received", "message": "Processing in background"}
+    status_code = 200 # Le statut HTTP par défaut est 200 OK.
+
+    # --- Récupérer les en-têtes (informations clés de la notification) ---
+    # Les informations cruciales sont dans les en-têtes HTTP de la requête POST, le corps est souvent vide.
+    channel_id = request.headers.get('X-Goog-Channel-ID')     # L'ID du canal que vous avez créé.
+    resource_id = request.headers.get('X-Goog-Resource-ID')   # L'ID de la ressource Drive surveillée (fichier ou Shared Drive).
+    resource_state = request.headers.get('X-Goog-Resource-State') # L'état de la ressource (ex: 'change', 'sync', 'trash').
+    channel_token = request.headers.get('X-Goog-Channel-Token') # Le token secret que vous avez fourni lors de la création.
+    message_number = request.headers.get('X-Goog-Message-Number') # Numéro de message incrémental pour le canal.
+
+    print(resource_id)
+    
+    logging.info(f"Webhook Headers: ChannelID={channel_id}, ResourceID={resource_id}, State={resource_state}, Token={channel_token}, MsgNum={message_number}")
+    # Décoder le corps de la requête. Il est souvent vide ou contient des données non-JSON importantes pour certains types d'événements.
+    logging.info(f"Webhook Body (usually empty): {request.data.decode('utf-8', errors='ignore')}")
+
+    # --- 2. Vérifier l'authenticité ---
+    # Cette étape est cruciale pour s'assurer que la notification provient bien de Google et non d'une source malveillante.
+    if not os.environ.get('CHANNEL_TOKEN') or channel_token != os.environ.get('CHANNEL_TOKEN'):
+        logging.error(f"Erreur de sécurité: X-Goog-Channel-Token incorrect. Attendu: '{os.environ.get('CHANNEL_TOKEN')}', Reçu: '{channel_token}'")
+        response_data = {"error": "Unauthorized webhook token"}
+        status_code = 403 # Retourne un statut 403 Forbidden si le token ne correspond pas.
+        return jsonify(response_data), status_code
+
+    # Les notifications de type 'sync' sont des pings de Google pour confirmer que le canal est actif.
+    # Elles ne contiennent pas de changements réels et ne nécessitent pas d'interroger l'API Drive.
+    if resource_state == 'sync':
+        logging.info("Webhook de synchronisation/confirmation reçu. Pas de traitement des changements à ce stade.")
+        return jsonify({"status": "sync_acknowledged"}), 200
+
+    # --- Déclenchement de la fonction de traitement longue dans un thread séparé ---
+    # Il est crucial de passer toutes les informations nécessaires à la fonction du thread.
+    thread_args = (resource_id, resource_state, local)
+    thread = threading.Thread(target=gdrive_sync_check, args=thread_args)
+    thread.start() # Démarre le thread en arrière-plan
+
+    logging.info(f"Requête webhook pour {resource_id} acceptée, traitement délégué à un thread.")
     return jsonify(response_data), status_code # Renvoie la réponse JSON avec le statut approprié.
+
 
 if __name__ == '__main__':
     load_dotenv()
