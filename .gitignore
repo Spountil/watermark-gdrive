@@ -1,3 +1,4 @@
 .env
 *.json
 functions/*/
+downloaded_files/*

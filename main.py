@@ -2,12 +2,14 @@ from flask import Flask, request, jsonify
 from google.oauth2 import service_account
 import google.auth
 from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseDownload
 import os
 import json
 import logging
 from dotenv import load_dotenv
 import datetime
 import threading
+import io
 
 
 logging.basicConfig(level=logging.INFO)
@@ -66,6 +68,8 @@ def save_startpagetoken(resource_id, token, local):
 def get_drive_service_for_webhook_receiver(local):
     """Initialise le service Google Drive pour le récepteur de webhook en utilisant les identifiants par défaut de Cloud Run."""
     global drive_service_receiver
+    global credentials
+
     if drive_service_receiver is None:
         logging.info("Initialisation du service Google Drive pour le récepteur.")
         # Obtient les identifiants par défaut du compte de service associé à la Cloud Run instance.
@@ -78,7 +82,37 @@ def get_drive_service_for_webhook_receiver(local):
             credentials, project = google.auth.default(scopes=SCOPES) 
 
         drive_service_receiver = build('drive', 'v3', credentials=credentials)
+
     return drive_service_receiver
+
+
+def download_file(drive_service, file_id, destination_path=None):
+    """
+    Télécharge le contenu d'un fichier depuis Google Drive.
+    """
+    try:
+        request = drive_service.files().get(fileId=file_id, alt='media')
+        file = io.BytesIO()
+        downloader = MediaIoBaseDownload(file, request)
+        done = False
+        while done is False:
+            status, done = downloader.next_chunk()
+            logging.info(f"Progression du téléchargement de {file_id}: {int(status.progress() * 100)}%")
+
+        file.seek(0)
+        file_content = file.read()
+
+        if destination_path:
+            with open(destination_path, 'wb') as f:
+                f.write(file_content)
+            logging.info(f"Fichier {file_id} téléchargé et sauvegardé à : {destination_path}")
+        else:
+            logging.info(f"Fichier {file_id} téléchargé en mémoire.")
+        return file
+        
+    except Exception as e:
+        logging.error(f"Erreur lors du téléchargement du fichier {file_id} depuis Google Drive : {e}", exc_info=True)
+        return None
 
 
 def gdrive_sync_check(resource_id, resource_state, local):
@@ -151,6 +185,15 @@ def gdrive_sync_check(resource_id, resource_state, local):
                     #    logging.info("Ce changement concerne mon dossier cible ! Lancer le script X ou mettre à jour la DB.")
                     # Vous pourriez déclencher d'autres actions, comme envoyer une notification,
                     # mettre à jour une base de données, ou lancer un autre processus.
+
+                    if not file_info.get('trashed'):
+                        download = download_file(drive_service, file_id, destination_path=FILE_SAVE_PATH + file_info.get('name'))
+
+                        if download:
+                            logging.info(f"Fichier {file_id} téléchargé en mémoire. Taille: {len(download.getvalue())} bytes.")
+                        else:
+                            logging.error(f"Échec du téléchargement du fichier {file_id}.")
+
                 else:
                     logging.info(f"  Changement sur fichier/dossier ID: {file_id} (supprimé ou inaccessible).")
 
@@ -220,6 +263,8 @@ def webhook():
 
 if __name__ == '__main__':
     load_dotenv()
+
+    FILE_SAVE_PATH = 'downloaded_files/' 
 
     try:
         from google.cloud import firestore
