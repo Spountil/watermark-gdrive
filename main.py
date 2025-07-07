@@ -10,6 +10,9 @@ from dotenv import load_dotenv
 import datetime
 import threading
 import io
+import time
+import shutil
+from functions.watermark import Watermark
 
 
 logging.basicConfig(level=logging.INFO)
@@ -86,18 +89,28 @@ def get_drive_service_for_webhook_receiver(local):
     return drive_service_receiver
 
 
-def download_file(drive_service, file_id, destination_path=None):
+def download_file(drive_service, file_id, destination_path=None, expected_file_size=None):
     """
     Télécharge le contenu d'un fichier depuis Google Drive.
     """
     try:
-        request = drive_service.files().get(fileId=file_id, alt='media')
+        request = drive_service.files().get_media(fileId=file_id)
+        logging.info(request)
         file = io.BytesIO()
         downloader = MediaIoBaseDownload(file, request)
         done = False
-        while done is False:
+        bytes_downloaded_total = 0 
+        logging.info(f"Début du téléchargement en streaming pour {file_id}. Taille attendue: {expected_file_size or 'inconnue'} octets.") # <------ CHANGEMENT ICI : Log la taille attendue
+        
+        while not done:
             status, done = downloader.next_chunk()
-            logging.info(f"Progression du téléchargement de {file_id}: {int(status.progress() * 100)}%")
+            if status:
+                logging.info(f"Progression du téléchargement de {file_id}: {int(status.progress() * 100)}% - Octets reçus: {file.tell()} / {status.total_size}") 
+                bytes_downloaded_total = file.tell() 
+            else:
+                logging.warning(f"Status is None during download loop for {file_id}. Done: {done}")
+
+        logging.info(f"Téléchargement de {file_id} terminé. Total octets écrits dans le buffer: {bytes_downloaded_total}") 
 
         file.seek(0)
         file_content = file.read()
@@ -106,9 +119,13 @@ def download_file(drive_service, file_id, destination_path=None):
             with open(destination_path, 'wb') as f:
                 f.write(file_content)
             logging.info(f"Fichier {file_id} téléchargé et sauvegardé à : {destination_path}")
-        else:
-            logging.info(f"Fichier {file_id} téléchargé en mémoire.")
-        return file
+
+        logging.info(f"Fichier {file_id} téléchargé. Taille finale lue: {len(file_content)} bytes.")
+
+        if expected_file_size and len(file_content) != expected_file_size:
+            logging.error(f"ATTENTION: Taille du fichier téléchargé ({len(file_content)} bytes) ne correspond PAS à la taille attendue ({expected_file_size} bytes) pour {file_id}!")
+
+        return file_content
         
     except Exception as e:
         logging.error(f"Erreur lors du téléchargement du fichier {file_id} depuis Google Drive : {e}", exc_info=True)
@@ -175,6 +192,7 @@ def gdrive_sync_check(resource_id, resource_state, local):
                 file_info = change.get('file')
                 if file_info:
                     parents = file_info.get('parents', [])
+                    file_size = int(file_info.get('size', 0))
                     logging.info(f"  Changement sur fichier/dossier ID: {file_id}, Nom: {file_info.get('name')}, Parents: {parents}, État: {'Supprimé' if file_info.get('trashed') else 'Actif'}")
                     # --- Votre LOGIQUE MÉTIER ICI pour le traitement du changement ---
                     # C'est ici que vous implémenteriez la logique spécifique à votre application.
@@ -187,10 +205,27 @@ def gdrive_sync_check(resource_id, resource_state, local):
                     # mettre à jour une base de données, ou lancer un autre processus.
 
                     if not file_info.get('trashed'):
-                        download = download_file(drive_service, file_id, destination_path=FILE_SAVE_PATH + file_info.get('name'))
+                        download = download_file(drive_service, file_id, destination_path=FILE_SAVE_PATH + file_info.get('name'), expected_file_size=file_size)
 
                         if download:
-                            logging.info(f"Fichier {file_id} téléchargé en mémoire. Taille: {len(download.getvalue())} bytes.")
+                            logging.info(f"Fichier {file_id} téléchargé en mémoire. Taille: {len(download)} bytes.")
+
+                            logging.info(f"Application du watermark sur le fichier {file_info.get('name')}...")
+
+                            time.sleep(1)  # Pause pour s'assurer que le fichier est complètement écrit avant de l'utiliser.
+
+                            wtmrk = Watermark(
+                                path=FILE_SAVE_PATH + file_info.get('name'),
+                                path_logo=os.getenv('LOGO_PATH'),  # Chemin par défaut pour le logo
+                                colors=(255, 255, 255),  # Couleur blanche par défaut
+                                opacity=50  # Opacité par défaut
+                            )
+
+                            # Applique le watermark sur le fichier téléchargé.
+                            # Note: Assurez-vous que le fichier est un type d'image supporté par PIL
+                            wtmrk.img_watermark()
+                            logging.info(f"Watermark appliqué sur le fichier {file_info.get('name')}.")
+
                         else:
                             logging.error(f"Échec du téléchargement du fichier {file_id}.")
 
@@ -264,7 +299,7 @@ def webhook():
 if __name__ == '__main__':
     load_dotenv()
 
-    FILE_SAVE_PATH = 'downloaded_files/' 
+    FILE_SAVE_PATH = os.getcwd() + '/downloaded_files/' 
 
     try:
         from google.cloud import firestore
