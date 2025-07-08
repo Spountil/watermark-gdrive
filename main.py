@@ -204,33 +204,40 @@ def gdrive_sync_check(resource_id, resource_state, local):
                     # mettre à jour une base de données, ou lancer un autre processus.
 
                     if not file_info.get('trashed'):
-                        if file_info.get('name') == 'settings.json':
+                        if (file_info.get('name') == 'settings.json') or (file_info.get('name') == 'logo.png'):
                             logging.info(f"Fichier de configuration détecté : {file_info.get('name')}. Téléchargement de ce fichier.")
                             
-                            path_file = os.getcwd() + '/settings/' + file_info.get('name')
+                            path_file = os.getcwd() + '/settings/' + file_info.get('name') if file_info.get('name') == 'settings.json' else os.getcwd() + '/logo/' + file_info.get('name')
                             watermark = False
                         else:
                             path_file = FILE_SAVE_PATH + file_info.get('name')
                             watermark = True
 
                             # Check si le fichier settings.json existe pour appliquer le watermark. Sinon, on le télécharge.
-                            path_settings = os.getcwd() + '/settings/settings.json'
+                            path_params = [os.getcwd() + '/settings/settings.json',
+                                           os.getcwd() + '/logo/logo.png']
 
-                            if not os.path.exists(path_settings):
-                                logging.error("Le fichier settings.json est introuvable. Téléchargerment du fichier setting.json.")
-                                watermark = False
+                            for param in path_params:
+                                if not os.path.exists(param):
+                                    logging.error(f"Le fichier {param} est introuvable. Téléchargerment du fichier {param}.")
 
-                                settings_file = drive_service.files().list(
-                                    q="mimeType='application/json'",
-                                    spaces="drive",
-                                    fields="nextPageToken, files(id, name, size)",
-                                    pageToken=None,
-                                ).execute()
+                                    if param.endswith('settings.json'):
+                                        mime_type = 'application/json'
+                                    else:
+                                        mime_type = 'image/png'
 
-                                settings_file_id = settings_file.get('files', [])[0].get('id')
-                                settings_file_size = settings_file.get('files', [])[0].get('size')
+                                    param_file = drive_service.files().list(
+                                        q=f"mimeType='{mime_type}'",
+                                        spaces="drive",
+                                        fields="nextPageToken, files(id, name, size)",
+                                        pageToken=None,
+                                    ).execute()
 
-                                download_file(drive_service, settings_file_id, destination_path=path_settings, expected_file_size=settings_file_size)
+                                    for file, n_file in zip(param_file.get('files', []), range(len(param_file.get('files', [])))):
+                                        if file.get('name') == 'setting.json' or file.get('name') == 'logo.png':
+                                            param_file_id = file.get('id')
+                                            param_file_size = file.get('size')
+                                            download_file(drive_service, param_file_id, destination_path=param, expected_file_size=param_file_size)
 
                         download = download_file(drive_service, file_id, destination_path=path_file, expected_file_size=file_size)
 
@@ -244,7 +251,7 @@ def gdrive_sync_check(resource_id, resource_state, local):
                                     settings = json.load(file)
 
                                 wtmrk = Watermark(
-                                    path=FILE_SAVE_PATH + file_info.get('name'),
+                                    path=path_file,
                                     path_logo=os.getenv('LOGO_PATH'),  # Chemin par défaut pour le logo
                                     colors=literal_eval(settings['colors']),  # Couleur blanche par défaut
                                     opacity=settings['opacity']  # Opacité par défaut

@@ -141,7 +141,7 @@ class Watermark():
 
         """
 
-        logging.info(f'Transformaing the logo in directory: {self.path_logo}')
+        logging.info(f'Transforming the logo in directory: {self.path_logo}')
         
         self.logo = Image.open(self.path_logo).convert("RGBA")
         self.logo = self.img_color(self.logo)
