@@ -5,20 +5,31 @@ from google.auth.transport.requests import Request
 import uuid
 import json
 import os
-import pickle
 from dotenv import load_dotenv
+import logging
+import google.auth
 
 SCOPES = ['https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/auth/drive.readonly']
 
 USER_TO_IMPERSONATE = None 
 DRIVE_SHARED_ID = None
 
-def get_drive_service():
-    """Initialise le service Google Drive en fonction du mode d'authentification."""
-    print("Utilisation du compte de service pour l'authentification.")
-    return service_account.Credentials.from_service_account_file(
-        os.getenv('SERVICE_ACCOUNT_FILE'), scopes=SCOPES, subject=USER_TO_IMPERSONATE
-    )
+load_dotenv()
+
+def get_drive_service(local):
+    logging.info("Initialisation du service Google Drive pour le récepteur.")
+    # Obtient les identifiants par défaut du compte de service associé à la Cloud Run instance.
+    # C'est la méthode recommandée pour l'authentification des services GCP.
+    if local:
+        credentials = service_account.Credentials.from_service_account_file(
+        os.getenv('SERVICE_ACCOUNT_FILE'), scopes=SCOPES, subject=None #os.getenv('USER_TO_IMPERSONATE')
+        )
+    else:
+        credentials, project = google.auth.default(scopes=SCOPES) 
+
+    drive_service_receiver = build('drive', 'v3', credentials=credentials)
+
+    return drive_service_receiver
 
 
 def get_current_start_page_token(service, drive_id=None):

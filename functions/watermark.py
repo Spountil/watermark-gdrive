@@ -189,7 +189,7 @@ class Watermark():
 
         image.paste(self.logo, (im2_x, im2_y), self.logo)
             
-        file = self.file
+        file = self.file.split('.')[0]
         path = self.path.rsplit('/', 1)[0]
 
         file_mrkd = f'{path}/{file}_mrkd.png'

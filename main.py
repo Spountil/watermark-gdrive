@@ -1,8 +1,7 @@
 from flask import Flask, request, jsonify
 from google.oauth2 import service_account
-import google.auth
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseDownload
+from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
 import os
 import json
 import logging
@@ -12,6 +11,7 @@ import threading
 import io
 from ast import literal_eval
 from functions.watermark import Watermark
+from functions.webhook import *
 
 
 logging.basicConfig(level=logging.INFO)
@@ -67,27 +67,6 @@ def save_startpagetoken(resource_id, token, local):
         logging.info(f"Token sauvegardé pour la ressource {resource_id}: {token}")
 
 
-def get_drive_service_for_webhook_receiver(local):
-    """Initialise le service Google Drive pour le récepteur de webhook en utilisant les identifiants par défaut de Cloud Run."""
-    global drive_service_receiver
-    global credentials
-
-    if drive_service_receiver is None:
-        logging.info("Initialisation du service Google Drive pour le récepteur.")
-        # Obtient les identifiants par défaut du compte de service associé à la Cloud Run instance.
-        # C'est la méthode recommandée pour l'authentification des services GCP.
-        if local:
-            credentials = service_account.Credentials.from_service_account_file(
-            os.getenv('SERVICE_ACCOUNT_FILE'), scopes=SCOPES, subject=USER_TO_IMPERSONATE
-            )
-        else:
-            credentials, project = google.auth.default(scopes=SCOPES) 
-
-        drive_service_receiver = build('drive', 'v3', credentials=credentials)
-
-    return drive_service_receiver
-
-
 def download_file(drive_service, file_id, destination_path=None, expected_file_size=None):
     """
     Télécharge le contenu d'un fichier depuis Google Drive.
@@ -129,6 +108,32 @@ def download_file(drive_service, file_id, destination_path=None, expected_file_s
     except Exception as e:
         logging.error(f"Erreur lors du téléchargement du fichier {file_id} depuis Google Drive : {e}", exc_info=True)
         return None
+    
+
+def upload_file(drive_service, new_file_name, local_file_path, new_mime_type, parent_folder_id=None):
+    try:
+        file_metadata = {
+            'name': new_file_name,
+            'parents': [parent_folder_id],
+            'shared': True
+        }
+
+        media_body = MediaFileUpload(local_file_path, new_mime_type, resumable=True)
+
+        new_file = drive_service.files().create(
+            body=file_metadata,
+            media_body=media_body,
+            fields='id,name,mimeType,size,parents,webViewLink', # Demande des champs utiles en retour
+            supportsAllDrives=True
+        ).execute()
+
+        logging.info(f"Nouveau fichier créé avec succès: '{new_file.get('name')}' (ID: {new_file.get('id')}). Taille: {new_file.get('size')} bytes.")
+        logging.info(f"Lien web du nouveau fichier: {new_file.get('webViewLink')}")
+        return new_file
+    
+    except Exception as e:
+        logging.error(f"Erreur lors de la création du fichier '{new_file_name}' sur Google Drive : {e}", exc_info=True)
+        return None
 
 
 def gdrive_sync_check(resource_id, resource_state, local):
@@ -138,7 +143,7 @@ def gdrive_sync_check(resource_id, resource_state, local):
     logging.info(f"Début du traitement asynchrone pour la ressource : {resource_id}, état : {resource_state}")
 
     try:
-        drive_service = get_drive_service_for_webhook_receiver(local)
+        drive_service = get_drive_service(local)
         
         # Récupère le dernier startPageToken connu pour cette ressource spécifique.
         # C'est le point de départ à partir duquel nous voulons lister les nouveaux changements.
@@ -189,6 +194,7 @@ def gdrive_sync_check(resource_id, resource_state, local):
             for change in changes:
                 file_id = change.get('fileId')
                 file_info = change.get('file')
+
                 if file_info:
                     parents = file_info.get('parents', [])
                     file_size = int(file_info.get('size', 0))
@@ -203,7 +209,7 @@ def gdrive_sync_check(resource_id, resource_state, local):
                     # Vous pourriez déclencher d'autres actions, comme envoyer une notification,
                     # mettre à jour une base de données, ou lancer un autre processus.
 
-                    if not file_info.get('trashed'):
+                    if (not file_info.get('trashed')) & (not os.getenv('RESULT_FILE_ID') in parents):
                         if (file_info.get('name') == 'settings.json') or (file_info.get('name') == 'logo.png'):
                             logging.info(f"Fichier de configuration détecté : {file_info.get('name')}. Téléchargement de ce fichier.")
                             
@@ -223,9 +229,11 @@ def gdrive_sync_check(resource_id, resource_state, local):
 
                                     if param.endswith('settings.json'):
                                         mime_type = 'application/json'
+                                        name = 'settings.json'
                                     else:
                                         mime_type = 'image/png'
-
+                                        name = 'logo.png'
+                                        
                                     param_file = drive_service.files().list(
                                         q=f"mimeType='{mime_type}'",
                                         spaces="drive",
@@ -233,11 +241,12 @@ def gdrive_sync_check(resource_id, resource_state, local):
                                         pageToken=None,
                                     ).execute()
 
-                                    for file, n_file in zip(param_file.get('files', []), range(len(param_file.get('files', [])))):
-                                        if file.get('name') == 'setting.json' or file.get('name') == 'logo.png':
+                                    for file in param_file.get('files', []):
+                                        if file.get('name') == name:
                                             param_file_id = file.get('id')
                                             param_file_size = file.get('size')
                                             download_file(drive_service, param_file_id, destination_path=param, expected_file_size=param_file_size)
+                                            break
 
                         download = download_file(drive_service, file_id, destination_path=path_file, expected_file_size=file_size)
 
@@ -259,9 +268,18 @@ def gdrive_sync_check(resource_id, resource_state, local):
 
                                 # Applique le watermark sur le fichier téléchargé.
                                 # Note: Assurez-vous que le fichier est un type d'image supporté par PIL
-                                wtmrk.img_watermark()
+                                new_file_path = wtmrk.img_watermark()
 
                                 logging.info(f"Watermark appliqué sur le fichier {file_info.get('name')}.")
+
+                                logging.info(f"Upload in folder id {os.getenv('RESULT_FILE_ID')}.")
+                                reply = upload_file(
+                                    drive_service,
+                                    new_file_name=new_file_path.split('/')[-1],  # Nom du fichier avec watermark
+                                    local_file_path=new_file_path,
+                                    new_mime_type='image/png',
+                                    parent_folder_id=os.getenv('RESULT_FILE_ID')
+                                )
 
                         else:
                             logging.error(f"Échec du téléchargement du fichier {file_id}.")
