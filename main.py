@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 import datetime
 import threading
 import io
+import time
 from ast import literal_eval
 from functions.watermark import Watermark
 from functions.webhook import *
@@ -115,7 +116,6 @@ def upload_file(drive_service, new_file_name, local_file_path, new_mime_type, pa
         file_metadata = {
             'name': new_file_name,
             'parents': [parent_folder_id],
-            'shared': True
         }
 
         media_body = MediaFileUpload(local_file_path, new_mime_type, resumable=True)
@@ -136,68 +136,53 @@ def upload_file(drive_service, new_file_name, local_file_path, new_mime_type, pa
         return None
 
 
-def gdrive_sync_check(resource_id, resource_state, local):
+def gdrive_sync_check(resource_id, resource_state, drive_service, changes, local):
     # --- 3. Traiter la notification (récupérer les détails des changements) ---
     # Le corps de la notification webhook est généralement vide ; les détails des changements doivent être récupérés via l'API Drive.
     
     logging.info(f"Début du traitement asynchrone pour la ressource : {resource_id}, état : {resource_state}")
 
     try:
-        drive_service = get_drive_service(local)
-        
-        # Récupère le dernier startPageToken connu pour cette ressource spécifique.
-        # C'est le point de départ à partir duquel nous voulons lister les nouveaux changements.
-        last_token = load_startpagetoken(resource_id, local)
-        
-        try:
-            last_token = last_token[resource_id].get('token')
-        except KeyError:
-            pass
-
-        if not last_token:
-            logging.warning(f"Aucun startPageToken précédent trouvé pour la ressource {resource_id}. Tentative de récupération du token actuel.")
-            # Si aucun token n'est trouvé (première exécution ou réinitialisation),
-            # on récupère le token actuel pour commencer à suivre les changements.
-            start_page_token_response = drive_service.changes().getStartPageToken(supportsAllDrives=True).execute()
-            last_token = start_page_token_response.get('startPageToken')
-            save_startpagetoken(resource_id, last_token, local) # Sauvegarde ce token initial pour les futures exécutions.
-            logging.info(f"Initial startPageToken retrieved and saved for {resource_id}: {last_token}")
-            # À ce stade, on pourrait décider de ne pas traiter les changements pour ce premier token si l'on veut partir d'un état "vierge".
-            # Pour cet exemple, le flux continue pour traiter tout changement.
-        
-        logging.info(f"Récupération des changements depuis le token: {last_token} pour ressource {resource_id}")
-        
-        # Heuristique pour déterminer si la ressource est un Shared Drive.
-        # Les IDs des Shared Drives ont typiquement une longueur de 33 caractères.
-        is_shared_drive_resource = len(resource_id) == 33 
-
-        # Appelle la méthode `changes().list()` pour obtenir la liste des changements réels.
-        # `pageToken` est le point de départ. `supportsAllDrives=True` est essentiel pour les Shared Drives.
-        # `includeRemoved=True` pour détecter les suppressions.
-        # `fields` pour limiter les données récupérées et optimiser la performance.
-        results = drive_service.changes().list(
-            pageToken=last_token,
-            supportsAllDrives=True,
-            includeRemoved=True,
-            driveId=resource_id if is_shared_drive_resource else None, 
-            fields="nextPageToken,newStartPageToken,changes(fileId,file(name,parents,mimeType,trashed,shared,size))"
-        ).execute()
-
-        changes = results.get('changes', [])
-        new_start_page_token = results.get('newStartPageToken') # Le token à utiliser pour la prochaine requête `list()`
 
         if changes:
+            if os.path.exists('file_ids.json'):
+                with open('file_ids.json', 'r') as f:
+                    file_ids = json.load(f)
+            else:
+                file_ids = []
+
             with open('response.json', 'w') as f:
                 json.dump(changes, f)
                 
             logging.info(f"Nombre de changements détectés : {len(changes)}")
+
             for change in changes:
                 file_id = change.get('fileId')
                 file_info = change.get('file')
+                
+                if (file_info.get('trashed')) or (not 'image/' in file_info.get('mimeType')):
+                    logging.info(f"Changement ignoré pour le fichier ID: {file_id} (supprimé ou non-image).")
+                    continue
+
+                if file_id in file_ids:
+                    logging.info(f"Changement déjà traité pour le fichier ID: {file_id}. Ignoré.")
+                    continue
+                else:
+                    file_ids.append(file_id)
+                    logging.info(f"Traitement du changement pour le fichier ID: {file_id}")
+
+                    file_ids = file_ids[-50:]  # Limite la taille de la liste pour éviter une surcharge mémoire
+                    with open('file_ids.json', 'w') as f:
+                        json.dump(file_ids, f)
 
                 if file_info:
                     parents = file_info.get('parents', [])
                     file_size = int(file_info.get('size', 0))
+
+                    if not os.getenv('FILE_ID') in parents:
+                        logging.info(f"Le fichier {file_info.get('name')} n'est pas dans le dossier surveillé. Ignoré.")
+                        continue
+
                     logging.info(f"  Changement sur fichier/dossier ID: {file_id}, Nom: {file_info.get('name')}, Parents: {parents}, État: {'Supprimé' if file_info.get('trashed') else 'Actif'}")
                     # --- Votre LOGIQUE MÉTIER ICI pour le traitement du changement ---
                     # C'est ici que vous implémenteriez la logique spécifique à votre application.
@@ -209,44 +194,43 @@ def gdrive_sync_check(resource_id, resource_state, local):
                     # Vous pourriez déclencher d'autres actions, comme envoyer une notification,
                     # mettre à jour une base de données, ou lancer un autre processus.
 
-                    if (not file_info.get('trashed')) & (not os.getenv('RESULT_FILE_ID') in parents):
-                        if (file_info.get('name') == 'settings.json') or (file_info.get('name') == 'logo.png'):
-                            logging.info(f"Fichier de configuration détecté : {file_info.get('name')}. Téléchargement de ce fichier.")
+                    if (file_info.get('name') == 'settings.json') or (file_info.get('name') == 'logo.png'):
+                        logging.info(f"Fichier de configuration détecté : {file_info.get('name')}. Téléchargement de ce fichier.")
                             
-                            path_file = os.getcwd() + '/settings/' + file_info.get('name') if file_info.get('name') == 'settings.json' else os.getcwd() + '/logo/' + file_info.get('name')
-                            watermark = False
-                        else:
-                            path_file = FILE_SAVE_PATH + file_info.get('name')
-                            watermark = True
+                        path_file = os.getcwd() + '/settings/' + file_info.get('name') if file_info.get('name') == 'settings.json' else os.getcwd() + '/logo/' + file_info.get('name')
+                        watermark = False
+                    else:
+                        path_file = FILE_SAVE_PATH + file_info.get('name')
+                        watermark = True
 
-                            # Check si le fichier settings.json existe pour appliquer le watermark. Sinon, on le télécharge.
-                            path_params = [os.getcwd() + '/settings/settings.json',
-                                           os.getcwd() + '/logo/logo.png']
+                        # Check si le fichier settings.json existe pour appliquer le watermark. Sinon, on le télécharge.
+                        path_params = [os.getcwd() + '/settings/settings.json',
+                                        os.getcwd() + '/logo/logo.png']
 
-                            for param in path_params:
-                                if not os.path.exists(param):
-                                    logging.error(f"Le fichier {param} est introuvable. Téléchargerment du fichier {param}.")
+                        for param in path_params:
+                            if not os.path.exists(param):
+                                logging.error(f"Le fichier {param} est introuvable. Téléchargerment du fichier {param}.")
 
-                                    if param.endswith('settings.json'):
-                                        mime_type = 'application/json'
-                                        name = 'settings.json'
-                                    else:
-                                        mime_type = 'image/png'
-                                        name = 'logo.png'
+                                if param.endswith('settings.json'):
+                                    mime_type = 'application/json'
+                                    name = 'settings.json'
+                                else:
+                                    mime_type = 'image/png'
+                                    name = 'logo.png'
                                         
-                                    param_file = drive_service.files().list(
-                                        q=f"mimeType='{mime_type}'",
-                                        spaces="drive",
-                                        fields="nextPageToken, files(id, name, size)",
-                                        pageToken=None,
-                                    ).execute()
+                                param_file = drive_service.files().list(
+                                    q=f"mimeType='{mime_type}'",
+                                    spaces="drive",
+                                    fields="nextPageToken, files(id, name, size)",
+                                    pageToken=None,
+                                ).execute()
 
-                                    for file in param_file.get('files', []):
-                                        if file.get('name') == name:
-                                            param_file_id = file.get('id')
-                                            param_file_size = file.get('size')
-                                            download_file(drive_service, param_file_id, destination_path=param, expected_file_size=param_file_size)
-                                            break
+                                for file in param_file.get('files', []):
+                                    if file.get('name') == name:
+                                        param_file_id = file.get('id')
+                                        param_file_size = file.get('size')
+                                        download_file(drive_service, param_file_id, destination_path=param, expected_file_size=param_file_size)
+                                        break
 
                         download = download_file(drive_service, file_id, destination_path=path_file, expected_file_size=file_size)
 
@@ -281,15 +265,14 @@ def gdrive_sync_check(resource_id, resource_state, local):
                                     parent_folder_id=os.getenv('RESULT_FILE_ID')
                                 )
 
+                                os.remove(new_file_path)  # Supprime le fichier temporaire après l'upload
+                                os.remove(path_file)  # Supprime le fichier original après l'upload
+
                         else:
                             logging.error(f"Échec du téléchargement du fichier {file_id}.")
 
                 else:
                     logging.info(f"  Changement sur fichier/dossier ID: {file_id} (supprimé ou inaccessible).")
-
-            if new_start_page_token:
-                save_startpagetoken(resource_id, new_start_page_token, local) # Sauvegarde le token pour le prochain cycle.
-                logging.info(f"startPageToken mis à jour vers : {new_start_page_token} pour ressource {resource_id}")
         else:
             logging.info("Aucun changement significatif détecté par changes.list() malgré la notification du webhook.")
 
@@ -311,7 +294,7 @@ def webhook():
     # Il est essentiel de répondre rapidement pour éviter que Google ne ré-essaie ou ne désactive le webhook.
     # On prépare une réponse par défaut qui sera envoyée.
     response_data = {"status": "received", "message": "Processing in background"}
-    status_code = 200 # Le statut HTTP par défaut est 200 OK.
+    status_code = 202 # Le statut HTTP par défaut est 200 OK.
 
     # --- Récupérer les en-têtes (informations clés de la notification) ---
     # Les informations cruciales sont dans les en-têtes HTTP de la requête POST, le corps est souvent vide.
@@ -320,8 +303,6 @@ def webhook():
     resource_state = request.headers.get('X-Goog-Resource-State') # L'état de la ressource (ex: 'change', 'sync', 'trash').
     channel_token = request.headers.get('X-Goog-Channel-Token') # Le token secret que vous avez fourni lors de la création.
     message_number = request.headers.get('X-Goog-Message-Number') # Numéro de message incrémental pour le canal.
-
-    print(resource_id)
     
     logging.info(f"Webhook Headers: ChannelID={channel_id}, ResourceID={resource_id}, State={resource_state}, Token={channel_token}, MsgNum={message_number}")
     # Décoder le corps de la requête. Il est souvent vide ou contient des données non-JSON importantes pour certains types d'événements.
@@ -341,9 +322,56 @@ def webhook():
         logging.info("Webhook de synchronisation/confirmation reçu. Pas de traitement des changements à ce stade.")
         return jsonify({"status": "sync_acknowledged"}), 200
 
+    drive_service = get_drive_service()
+        
+    # Récupère le dernier startPageToken connu pour cette ressource spécifique.
+    # C'est le point de départ à partir duquel nous voulons lister les nouveaux changements.
+    last_token = load_startpagetoken(resource_id, local)
+        
+    try:
+        last_token = last_token[resource_id].get('token')
+    except KeyError:
+        pass
+
+    if not last_token:
+        logging.warning(f"Aucun startPageToken précédent trouvé pour la ressource {resource_id}. Tentative de récupération du token actuel.")
+        # Si aucun token n'est trouvé (première exécution ou réinitialisation),
+        # on récupère le token actuel pour commencer à suivre les changements.
+        start_page_token_response = drive_service.changes().getStartPageToken(supportsAllDrives=True).execute()
+        last_token = start_page_token_response.get('startPageToken')
+        save_startpagetoken(resource_id, last_token, local) # Sauvegarde ce token initial pour les futures exécutions.
+        logging.info(f"Initial startPageToken retrieved and saved for {resource_id}: {last_token}")
+        # À ce stade, on pourrait décider de ne pas traiter les changements pour ce premier token si l'on veut partir d'un état "vierge".
+        # Pour cet exemple, le flux continue pour traiter tout changement.
+    
+    logging.info(f"Récupération des changements depuis le token: {last_token} pour ressource {resource_id}")
+        
+    # Heuristique pour déterminer si la ressource est un Shared Drive.
+    # Les IDs des Shared Drives ont typiquement une longueur de 33 caractères.
+    is_shared_drive_resource = len(resource_id) == 33 
+
+    # Appelle la méthode `changes().list()` pour obtenir la liste des changements réels.
+    # `pageToken` est le point de départ. `supportsAllDrives=True` est essentiel pour les Shared Drives.
+    # `includeRemoved=True` pour détecter les suppressions.
+    # `fields` pour limiter les données récupérées et optimiser la performance.
+    results = drive_service.changes().list(
+        pageToken=last_token,
+        supportsAllDrives=True,
+        includeRemoved=True,
+        driveId=resource_id if is_shared_drive_resource else None, 
+        fields="nextPageToken,newStartPageToken,changes(fileId,file(name,parents,mimeType,trashed,shared,size))"
+    ).execute()
+
+    changes = results.get('changes', [])
+    new_start_page_token = results.get('newStartPageToken') # Le token à utiliser pour la prochaine requête `list()`
+
+    if new_start_page_token:
+        save_startpagetoken(resource_id, new_start_page_token, local) # Sauvegarde le token pour le prochain cycle.
+        logging.info(f"startPageToken mis à jour vers : {new_start_page_token} pour ressource {resource_id}")
+
     # --- Déclenchement de la fonction de traitement longue dans un thread séparé ---
     # Il est crucial de passer toutes les informations nécessaires à la fonction du thread.
-    thread_args = (resource_id, resource_state, local)
+    thread_args = (resource_id, resource_state, drive_service, changes, local)
     thread = threading.Thread(target=gdrive_sync_check, args=thread_args)
     thread.start() # Démarre le thread en arrière-plan
 

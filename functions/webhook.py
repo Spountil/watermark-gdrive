@@ -1,5 +1,5 @@
-from google.oauth2 import service_account
 from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from google.auth.transport.requests import Request
 import uuid
@@ -16,18 +16,44 @@ DRIVE_SHARED_ID = None
 
 load_dotenv()
 
-def get_drive_service(local):
+def get_drive_service():
     logging.info("Initialisation du service Google Drive pour le récepteur.")
     # Obtient les identifiants par défaut du compte de service associé à la Cloud Run instance.
     # C'est la méthode recommandée pour l'authentification des services GCP.
-    if local:
-        credentials = service_account.Credentials.from_service_account_file(
-        os.getenv('SERVICE_ACCOUNT_FILE'), scopes=SCOPES, subject=None #os.getenv('USER_TO_IMPERSONATE')
-        )
-    else:
-        credentials, project = google.auth.default(scopes=SCOPES) 
+    creds = None
+    # The file token.json stores the user's access and refresh tokens.
+    if os.path.exists(os.getenv('TOKEN_PATH')):
+        try:
+            creds = Credentials.from_authorized_user_file(os.getenv('TOKEN_PATH'), SCOPES)
+        except Exception as e:
+            print(f"Error loading credentials from {os.getenv('TOKEN_PATH')}: {e}")
+            print("You may need to delete the token.json file and re-authenticate.")
+            return None
 
-    drive_service_receiver = build('drive', 'v3', credentials=credentials)
+    # If there are no (valid) credentials available, let the user log in.
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            print("Credentials have expired. Refreshing token...")
+            try:
+                creds.refresh(Request())
+            except Exception as e:
+                print(f"Error refreshing token: {e}")
+                print("Re-authentication is required.")
+                # Fallback to re-authentication
+                flow = InstalledAppFlow.from_client_secrets_file(os.getenv('SERVICE_ACCOUNT_FILE'), SCOPES)
+                creds = flow.run_local_server(port=0)
+        else:
+            print("No valid credentials found. Starting authentication flow...")
+            # This will open a browser window for the user to grant consent.
+            flow = InstalledAppFlow.from_client_secrets_file(os.getenv('SERVICE_ACCOUNT_FILE'), SCOPES)
+            creds = flow.run_local_server(port=0)
+        
+        # Save the credentials for the next run
+        with open(os.getenv('TOKEN_PATH'), 'w') as token:
+            token.write(creds.to_json())
+            print(f"Credentials saved to {os.getenv('TOKEN_PATH')}")
+
+    drive_service_receiver = build('drive', 'v3', credentials=creds)
 
     return drive_service_receiver
 
@@ -59,7 +85,7 @@ def create_drive_changes_webhook_channel(service, webhook_url, start_page_token,
     body = {
         'id': channel_id,
         'type': 'web_hook',
-        'address': webhook_url
+        'address': webhook_url,
     }
     if channel_token:
         body['token'] = channel_token

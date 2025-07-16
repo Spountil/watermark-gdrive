@@ -5,7 +5,7 @@ if __name__ == "__main__":
     load_dotenv()
 
     # 1. Obtenir les identifiants
-    drive_service = get_drive_service(local=True)
+    drive_service = get_drive_service()
 
     with open('webhook_response.json') as f:
         response = json.load(f)
