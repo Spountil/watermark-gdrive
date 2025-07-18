@@ -10,7 +10,7 @@ if __name__ == "__main__":
     print(os.getenv('SERVICE_ACCOUNT_FILE'))
 
     # 1. Obtenir les identifiants
-    drive_service = get_drive_service(local=True)
+    drive_service = get_drive_service()
 
     print("Récupération du startPageToken actuel...")
     current_token = get_current_start_page_token(drive_service, drive_id=DRIVE_SHARED_ID)
