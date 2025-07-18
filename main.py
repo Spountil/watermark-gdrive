@@ -194,82 +194,76 @@ def gdrive_sync_check(resource_id, resource_state, drive_service, changes, local
                     # Vous pourriez déclencher d'autres actions, comme envoyer une notification,
                     # mettre à jour une base de données, ou lancer un autre processus.
 
-                    if (file_info.get('name') == 'settings.json') or (file_info.get('name') == 'logo.png'):
-                        logging.info(f"Fichier de configuration détecté : {file_info.get('name')}. Téléchargement de ce fichier.")
-                            
-                        path_file = os.getcwd() + '/settings/' + file_info.get('name') if file_info.get('name') == 'settings.json' else os.getcwd() + '/logo/' + file_info.get('name')
-                        watermark = False
-                    else:
-                        path_file = FILE_SAVE_PATH + file_info.get('name')
-                        watermark = True
+                    path_file = FILE_SAVE_PATH + file_info.get('name')
+                    watermark = True
 
-                        # Check si le fichier settings.json existe pour appliquer le watermark. Sinon, on le télécharge.
-                        path_params = [os.getcwd() + '/settings/settings.json',
-                                        os.getcwd() + '/logo/logo.png']
+                    # Check si le fichier settings.json existe pour appliquer le watermark. Sinon, on le télécharge.
+                    path_params = [os.getcwd() + '/settings/settings.json',
+                                    os.getcwd() + '/logo/logo.png']
 
-                        for param in path_params:
-                            if not os.path.exists(param):
-                                logging.error(f"Le fichier {param} est introuvable. Téléchargerment du fichier {param}.")
+                    for param in path_params:
+                        if not os.path.exists(param):
+                            logging.error(f"Le fichier {param} est introuvable. Téléchargerment du fichier {param}.")
 
-                                if param.endswith('settings.json'):
-                                    mime_type = 'application/json'
-                                    name = 'settings.json'
-                                else:
-                                    mime_type = 'image/png'
-                                    name = 'logo.png'
+                            if param.endswith('settings.json'):
+                                mime_type = 'application/json'
+                                name = 'settings.json'
+                            else:
+                                mime_type = 'image/png'
+                                name = 'logo.png'
                                         
-                                param_file = drive_service.files().list(
-                                    q=f"mimeType='{mime_type}'",
-                                    spaces="drive",
-                                    fields="nextPageToken, files(id, name, size)",
-                                    pageToken=None,
-                                ).execute()
+                            param_file = drive_service.files().list(
+                                q=f"mimeType='{mime_type}'",
+                                spaces="drive",
+                                fields="nextPageToken, files(id, name, size)",
+                                pageToken=None,
+                            ).execute()
 
-                                for file in param_file.get('files', []):
-                                    if file.get('name') == name:
-                                        param_file_id = file.get('id')
-                                        param_file_size = file.get('size')
-                                        download_file(drive_service, param_file_id, destination_path=param, expected_file_size=param_file_size)
-                                        break
+                            for file in param_file.get('files', []):
+                                if file.get('name') == name:
+                                    param_file_id = file.get('id')
+                                    param_file_size = file.get('size')
+                                    download_file(drive_service, param_file_id, destination_path=param, expected_file_size=param_file_size)
+                                    break
 
-                        download = download_file(drive_service, file_id, destination_path=path_file, expected_file_size=file_size)
+                    download = download_file(drive_service, file_id, destination_path=path_file, expected_file_size=file_size)
 
-                        if download:
-                            logging.info(f"Fichier {file_id} téléchargé en mémoire. Taille: {len(download)} bytes.")
+                    if download:
+                        logging.info(f"Fichier {file_id} téléchargé en mémoire. Taille: {len(download)} bytes.")
 
-                            if watermark:
-                                logging.info(f"Application du watermark sur le fichier {file_info.get('name')}...")
+                        if watermark:
+                            logging.info(f"Application du watermark sur le fichier {file_info.get('name')}...")
 
-                                with open(os.getcwd() + '/settings/settings.json', 'r') as file:
-                                    settings = json.load(file)
+                            with open(os.getcwd() + '/settings/settings.json', 'r') as file:
+                                settings = json.load(file)
 
-                                wtmrk = Watermark(
-                                    path=path_file,
-                                    path_logo=os.getenv('LOGO_PATH'),  # Chemin par défaut pour le logo
-                                    colors=literal_eval(settings['colors']),  # Couleur blanche par défaut
-                                    opacity=settings['opacity']  # Opacité par défaut
-                                )
+                            wtmrk = Watermark(
+                                path=path_file,
+                                path_logo=os.getenv('LOGO_PATH'),  # Chemin par défaut pour le logo
+                                colors=literal_eval(settings['colors']),  # Couleur blanche par défaut
+                                opacity=settings['opacity']  # Opacité par défaut
+                            )
 
-                                # Applique le watermark sur le fichier téléchargé.
-                                # Note: Assurez-vous que le fichier est un type d'image supporté par PIL
-                                new_file_path = wtmrk.img_watermark()
+                            # Applique le watermark sur le fichier téléchargé.
+                            # Note: Assurez-vous que le fichier est un type d'image supporté par PIL
+                            new_file_path = wtmrk.img_watermark()
 
-                                logging.info(f"Watermark appliqué sur le fichier {file_info.get('name')}.")
+                            logging.info(f"Watermark appliqué sur le fichier {file_info.get('name')}.")
 
-                                logging.info(f"Upload in folder id {os.getenv('RESULT_FILE_ID')}.")
-                                reply = upload_file(
-                                    drive_service,
-                                    new_file_name=new_file_path.split('/')[-1],  # Nom du fichier avec watermark
-                                    local_file_path=new_file_path,
-                                    new_mime_type='image/png',
-                                    parent_folder_id=os.getenv('RESULT_FILE_ID')
-                                )
+                            logging.info(f"Upload in folder id {os.getenv('RESULT_FILE_ID')}.")
+                            reply = upload_file(
+                                drive_service,
+                                new_file_name=new_file_path.split('/')[-1],  # Nom du fichier avec watermark
+                                local_file_path=new_file_path,
+                                new_mime_type='image/png',
+                                parent_folder_id=os.getenv('RESULT_FILE_ID')
+                            )
 
-                                os.remove(new_file_path)  # Supprime le fichier temporaire après l'upload
-                                os.remove(path_file)  # Supprime le fichier original après l'upload
+                            os.remove(new_file_path)  # Supprime le fichier temporaire après l'upload
+                            os.remove(path_file)  # Supprime le fichier original après l'upload
 
-                        else:
-                            logging.error(f"Échec du téléchargement du fichier {file_id}.")
+                    else:
+                        logging.error(f"Échec du téléchargement du fichier {file_id}.")
 
                 else:
                     logging.info(f"  Changement sur fichier/dossier ID: {file_id} (supprimé ou inaccessible).")
