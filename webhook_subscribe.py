@@ -1,22 +1,33 @@
-from functions.webhook import *
 from dotenv import load_dotenv
 import json
+import os
+import logging
+import sys
+from functions.webhook import get_drive_service, create_drive_changes_webhook_channel
+from functions.gdrive_token import get_current_start_page_token
+
+root = logging.getLogger()
+root.setLevel(logging.DEBUG)
+handler = logging.StreamHandler(sys.stdout)
+handler.setLevel(logging.DEBUG)
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+handler.setFormatter(formatter)
+root.addHandler(handler)
 
 DRIVE_SHARED_ID = None
 
 if __name__ == "__main__":
     load_dotenv()
 
-    print(os.getenv('SERVICE_ACCOUNT_FILE'))
+    logging.info(os.getenv('SERVICE_ACCOUNT_FILE'))
 
-    # 1. Obtenir les identifiants
     drive_service = get_drive_service()
 
-    print("Récupération du startPageToken actuel...")
+    logging.info(f"Getting current startPageToken for Shared Drive ID: {DRIVE_SHARED_ID}")
     current_token = get_current_start_page_token(drive_service, drive_id=DRIVE_SHARED_ID)
 
     if current_token:
-        print(f"startPageToken actuel: {current_token}")
+        logging.info(f"Current startPageToken: {current_token}")
         # 4. Créer le canal de notification pour les changements
         response = create_drive_changes_webhook_channel(
             drive_service,
@@ -31,4 +42,4 @@ if __name__ == "__main__":
 
 
     else:
-        print("Impossible de récupérer le startPageToken. Le webhook ne peut pas être créé.")
+        logging.info("Cannot get startPageToken. Webhook was not created.")
