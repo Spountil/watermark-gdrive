@@ -22,6 +22,16 @@ SCOPES = ['https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/a
 
 drive_service_receiver = None
 
+
+@app.route('/', methods=['GET'])
+def landing_page():
+    name = f"""
+    Received a GET request on the root endpoint.
+    Here is one env variable: {os.getenv('LOGO_PATH')}
+        """
+    return name, 200
+
+
 @app.route('/webhook', methods=['POST'])
 def webhook():
 
@@ -106,7 +116,7 @@ if __name__ == '__main__':
         logging.info("Firestore client initialized successfully.")
     except ImportError:
         USER_TO_IMPERSONATE = None
-        LOCAL_TOKEN_DB_FILE = 'token.json'
+        LOCAL_TOKEN_DB_FILE = 'local_webhook_tokens.json'
         drive_service_receiver = None
         local = True
         logging.info("Firestore client could not be imported. Using local JSON file for tokens.")
