@@ -32,7 +32,7 @@ def load_credentials():
 
 def get_drive_service():
     logging.info("Initialisation of Google Drive service for the receiver.")
-    creds = None
+    creds = load_credentials()
     # The file token.json stores the user's access and refresh tokens.
     if os.path.exists(os.getenv('TOKEN_PATH')):
         try:
