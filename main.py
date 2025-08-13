@@ -7,6 +7,7 @@ import threading
 from functions.webhook import get_drive_service
 from functions.gdrive_token import load_startpagetoken, save_startpagetoken
 from functions.gdrive_file_handler import gdrive_file_handler
+from webhook_subscribe import webhook_subscribe
 
 root = logging.getLogger()
 root.setLevel(logging.DEBUG)
@@ -25,10 +26,23 @@ drive_service_receiver = None
 
 @app.route('/', methods=['GET'])
 def landing_page():
-    name = f"""
-    Received a GET request on the root endpoint.
-    Here is one env variable: {os.getenv('LOGO_PATH')}
+    token = request.headers.get('WHO-ARE-YOU')
+
+    if os.getenv('CHANNEL_TOKEN') == token:
+        logging.info("Received a valid token in the GET request.")
+        webhook_subscribe()
+        logging.info("Webhook subscription initiated.")
+
+        name = f"""
+        Received a GET request on the root endpoint.
+        Subscribing to the webhook with the token.
         """
+    else:
+        name = f"""
+        Received a GET request on the root endpoint.
+        Hello World.
+        """
+
     return name, 200
 
 
