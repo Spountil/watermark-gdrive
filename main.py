@@ -26,7 +26,7 @@ drive_service_receiver = None
 def webhook():
 
     response_data = {"status": "received", "message": "Processing in background"}
-    status_code = 202 # 202 Accepted pour indiquer que la requête a été reçue mais le traitement est en cours.
+    status_code = 202 # 202 Accepted to indicate that the request has been accepted for processing, but the processing is not complete.
 
     channel_id = request.headers.get('X-Goog-Channel-ID') # ID of the channel that received the notification.
     resource_id = request.headers.get('X-Goog-Resource-ID') # ID of the resource that changed (e.g., a Shared Drive ID).
@@ -106,7 +106,7 @@ if __name__ == '__main__':
         logging.info("Firestore client initialized successfully.")
     except ImportError:
         USER_TO_IMPERSONATE = None
-        LOCAL_TOKEN_DB_FILE = 'local_webhook_tokens.json'
+        LOCAL_TOKEN_DB_FILE = 'token.json'
         drive_service_receiver = None
         local = True
         logging.info("Firestore client could not be imported. Using local JSON file for tokens.")

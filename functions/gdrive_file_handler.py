@@ -103,6 +103,12 @@ def gdrive_file_handler(resource_id, resource_state, drive_service, changes, FIL
             for change in changes:
                 file_id = change.get('fileId')
                 file_info = change.get('file')
+
+                try:
+                    file_info.get('trashed')
+                except:
+                    print(f"File {file_id} does not have a 'trashed' attribute. File info: {file_info}.")
+                    continue
                 
                 if (file_info.get('trashed')) or (not 'image/' in file_info.get('mimeType')):
                     logging.info(f"Changed ignored for the file ID: {file_id} (deleted or non-image).")

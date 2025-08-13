@@ -2,3 +2,4 @@
 *.json
 functions/*/
 downloaded_files/*
+lib
