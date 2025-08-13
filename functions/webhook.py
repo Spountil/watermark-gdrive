@@ -16,19 +16,24 @@ DRIVE_SHARED_ID = None
 load_dotenv()
 
 def load_credentials():
-    creds = {
-            "installed":
-            {"client_id":os.getenv('CLIENT_ID'),
-            "project_id":os.getenv('PROJECT_ID'),
-            "auth_uri":os.getenv('AUTH_URI'),
-            "token_uri":os.getenv('TOKEN_URI'),
-            "auth_provider_x509_cert_url":os.getenv('AUTH_PROVIDER_X509_CERT_URL'),
-            "client_secret":os.getenv('CLIENT_SECRET'),
-            "redirect_uris":[os.getenv('REDIRECT_URIS')]
-            }
-            }
+    file_name = 'token.json'
+
+    creds ={
+        "token": os.getenv('TOKEN'),
+        "refresh_token": os.getenv('REFRESH_TOKEN'),
+        "token_uri": os.getenv('TOKEN_URI'),
+        "client_id": os.getenv('CLIENT_ID'), 
+        "client_secret": os.getenv('CLIENT_SECRET'),
+        "scopes": SCOPES, 
+        "universe_domain": os.getenv('UNIVERSE_DOMAIN'), 
+        "account": "", 
+        "expiry": os.getenv('EXPIRY')
+    }   
     
-    return creds
+    with open(file_name, 'w') as f:
+        json.dump(creds, f)
+
+    return file_name
 
 def get_drive_service():
     logging.info("Initialisation of Google Drive service for the receiver.")
@@ -52,12 +57,12 @@ def get_drive_service():
                 logging.info(f"Error refreshing token: {e}")
                 logging.info("Re-authentication is required.")
                 # Fallback to re-authentication
-                flow = InstalledAppFlow.from_client_secrets_file(creds, SCOPES)
+                flow = InstalledAppFlow.from_client_secrets_file(os.getenv('SERCRET_FILE_PATH'), SCOPES)
                 creds = flow.run_local_server(port=0)
         else:
             logging.info("No valid credentials found. Starting authentication flow...")
             # This will open a browser window for the user to grant consent.
-            flow = InstalledAppFlow.from_client_secrets_file(creds, SCOPES)
+            flow = InstalledAppFlow.from_client_secrets_file(os.getenv('SERCRET_FILE_PATH'), SCOPES)
             creds = flow.run_local_server(port=0)
         
         # Save the credentials for the next run
