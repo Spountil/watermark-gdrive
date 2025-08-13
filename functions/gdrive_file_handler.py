@@ -34,9 +34,14 @@ def download_file(drive_service, file_id, destination_path=None, expected_file_s
         file_content = file.read()
 
         if destination_path:
+            if not os.path.exists(os.path.dirname(destination_path)):
+                logging.info(f"Creating the directory for {destination_path}.")
+                os.makedirs(os.path.dirname(destination_path))
+                
             with open(destination_path, 'wb') as f:
                 f.write(file_content)
             logging.info(f"File {file_id} downloaded and saved at: {destination_path}")
+
 
         logging.info(f"File {file_id} downloaded. Final size: {len(file_content)} bytes.")
 
