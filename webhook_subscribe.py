@@ -16,11 +16,7 @@ root.addHandler(handler)
 
 DRIVE_SHARED_ID = None
 
-if __name__ == "__main__":
-    load_dotenv()
-
-    logging.info(os.getenv('SERVICE_ACCOUNT_FILE'))
-
+def webhook_subscribe():
     drive_service = get_drive_service()
 
     logging.info(f"Getting current startPageToken for Shared Drive ID: {DRIVE_SHARED_ID}")
@@ -39,7 +35,11 @@ if __name__ == "__main__":
 
         with open('webhook_response.json', 'w') as f:
             json.dump(response, f)
-
-
+            
     else:
         logging.info("Cannot get startPageToken. Webhook was not created.")
+
+if __name__ == "__main__":
+    load_dotenv()
+
+    webhook_subscribe()
