@@ -71,7 +71,7 @@ def upload_file(drive_service, new_file_name, local_file_path, new_mime_type, pa
         new_file = drive_service.files().create(
             body=file_metadata,
             media_body=media_body,
-            fields='id,name,mimeType,size,parents,webViewLink', # Demande des champs utiles en retour
+            fields='id,name,mimeType,size,parents,webViewLink',
             supportsAllDrives=True
         ).execute()
 
@@ -136,7 +136,19 @@ def gdrive_file_handler(resource_id, resource_state, drive_service, changes, FIL
                     file_size = int(file_info.get('size', 0))
 
                     # Check if the file is in the watched folder by comparing its parents with the FILE_ID environment variable.
-                    if not os.getenv('FILE_ID') in parents:
+                    if os.getenv('FILE_ID') in parents:
+                        logging.info(f"File {file_info.get('name')} in a watched folder.")
+                    elif os.getenv('SETTING_FILE_ID') in parents:
+                        logging.info(f"File {file_info.get('name')} is a settings file.")
+
+                        if file_info.get('name').endswith('.json'):
+                            folder = '/settings/'
+                        else:
+                            folder = '/logo/'
+
+                        download_file(drive_service, file_id, destination_path=os.getcwd() + folder + file_info.get('name'), expected_file_size=file_size)
+                        continue
+                    else:
                         logging.info(f"File {file_info.get('name')} not in a watched folder. Ignored.")
                         continue
 

@@ -3,3 +3,7 @@
 functions/*/
 downloaded_files/*
 lib
+compose.yaml
+logo/*
+settings/*
+*.png
