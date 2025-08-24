@@ -3,3 +3,7 @@
 functions/*/
 downloaded_files/*
 lib
+docker-compose.yml
+logo/*
+settings/*
+*.png

@@ -7,6 +7,8 @@ import json
 import os
 from dotenv import load_dotenv
 import logging
+import datetime
+import time
 
 SCOPES = ['https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/auth/drive.readonly']
 
@@ -83,7 +85,9 @@ def create_drive_changes_webhook_channel(service, webhook_url, start_page_token,
         'id': channel_id,
         'type': 'web_hook',
         'address': webhook_url,
+        'expiration': int(time.mktime((datetime.datetime.now() + datetime.timedelta(days=1)).timetuple())) * 1000
     }
+
     if channel_token:
         body['token'] = channel_token
 
