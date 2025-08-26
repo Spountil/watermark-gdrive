@@ -18,7 +18,7 @@ if __name__ == "__main__":
     # 1. Obtenir les identifiants
     drive_service = get_drive_service()
 
-    with open('/files/webhook_response.json') as f:
+    with open('./files/webhook_response.json') as f:
         response = json.load(f)
 
     CHANNEL_TO_STOP_ID = response['id']
