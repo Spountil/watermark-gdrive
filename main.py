@@ -130,7 +130,7 @@ if __name__ == '__main__':
         logging.info("Firestore client initialized successfully.")
     except ImportError:
         USER_TO_IMPERSONATE = None
-        LOCAL_TOKEN_DB_FILE = 'local_webhook_tokens.json'
+        LOCAL_TOKEN_DB_FILE = '/files/local_webhook_tokens.json'
         drive_service_receiver = None
         local = True
         logging.info("Firestore client could not be imported. Using local JSON file for tokens.")

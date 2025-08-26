@@ -94,14 +94,14 @@ def gdrive_file_handler(resource_id, resource_state, drive_service, changes, FIL
     try:
 
         if changes:
-            if os.path.exists('file_ids.json'):
-                with open('file_ids.json', 'r') as f:
+            if os.path.exists('/files/file_ids.json'):
+                with open('/files/file_ids.json', 'r') as f:
                     file_ids = json.load(f)
             else:
                 file_ids = []
 
-            with open('response.json', 'w') as f:
-                json.dump(changes, f)
+            # with open('files/response.json', 'w') as f:
+            #     json.dump(changes, f)
                 
             logging.info(f"Number of changes detected : {len(changes)}")
 
@@ -128,7 +128,7 @@ def gdrive_file_handler(resource_id, resource_state, drive_service, changes, FIL
 
                     # Use a list of the previously processed file IDs to avoid reprocessing, especially in case of multiple changes.
                     file_ids = file_ids[-50:]  # Limite the size of the file_ids list to the last 50 processed files.
-                    with open('file_ids.json', 'w') as f:
+                    with open('/files/file_ids.json', 'w') as f:
                         json.dump(file_ids, f)
 
                 if file_info:
@@ -142,9 +142,9 @@ def gdrive_file_handler(resource_id, resource_state, drive_service, changes, FIL
                         logging.info(f"File {file_info.get('name')} is a settings file.")
 
                         if file_info.get('name').endswith('.json'):
-                            folder = '/settings/'
+                            folder = '/files/settings/'
                         else:
-                            folder = '/logo/'
+                            folder = '/files/logo/'
 
                         download_file(drive_service, file_id, destination_path=os.getcwd() + folder + file_info.get('name'), expected_file_size=file_size)
                         continue
@@ -158,8 +158,8 @@ def gdrive_file_handler(resource_id, resource_state, drive_service, changes, FIL
                     watermark = True
 
                     # Check if settings and logo files exist, if not, download them from Google Drive.
-                    path_params = [os.getcwd() + '/settings/settings.json',
-                                    os.getcwd() + '/logo/logo.png']
+                    path_params = [os.getcwd() + '/files/settings/settings.json',
+                                    os.getcwd() + '/files/logo/logo.png']
 
                     for param in path_params:
                         if not os.path.exists(param):
@@ -194,7 +194,7 @@ def gdrive_file_handler(resource_id, resource_state, drive_service, changes, FIL
                         if watermark:
                             logging.info(f"Adding the watermark on the file {file_info.get('name')}...")
 
-                            with open(os.getcwd() + '/settings/settings.json', 'r') as file:
+                            with open(os.getcwd() + '/files/settings/settings.json', 'r') as file:
                                 settings = json.load(file)
 
                             wtmrk = Watermark(
