@@ -18,7 +18,7 @@ DRIVE_SHARED_ID = None
 load_dotenv()
 
 def load_credentials():
-    file_name = 'token.json'
+    file_name = os.getenv('TOKEN_PATH')
 
     creds ={
         "token": os.getenv('TOKEN'),

@@ -33,7 +33,7 @@ def webhook_subscribe():
             DRIVE_SHARED_ID
         )
 
-        with open('webhook_response.json', 'w') as f:
+        with open('/files/webhook_response.json', 'w') as f:
             json.dump(response, f)
             
     else:
