@@ -2,22 +2,22 @@ from flask import Flask, request, jsonify
 import os
 import sys
 import logging
-import json
 from dotenv import load_dotenv
 import threading
-from functions.webhook import get_drive_service
-from functions.gdrive_token import load_startpagetoken, save_startpagetoken
+import firebase_admin
 from functions.gdrive_file_handler import gdrive_file_handler
+from functions.webhook_check import sync_check
 from webhook_subscribe import webhook_subscribe
-from functions.webhook_check import webhook_check
+from webhook_unsubscribe import webhook_unsubscribe
 
-# root = logging.getLogger()
-# root.setLevel(logging.DEBUG)
-# handler = logging.StreamHandler(sys.stdout)
-# handler.setLevel(logging.DEBUG)
-# formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-# handler.setFormatter(formatter)
-# root.addHandler(handler)
+
+root = logging.getLogger()
+root.setLevel(logging.DEBUG)
+handler = logging.StreamHandler(sys.stdout)
+handler.setLevel(logging.DEBUG)
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+handler.setFormatter(formatter)
+root.addHandler(handler)
 
 app = Flask(__name__)
 
@@ -31,7 +31,10 @@ def landing_page():
     token = request.headers.get('WHO-ARE-YOU')
 
     if os.getenv('CHANNEL_TOKEN') == token:
+
         logging.info("Received a valid token in the GET request.")
+        webhook_unsubscribe()
+        logging.info("Unsubscribed from current webhook to avoid duplicated POST.")
         webhook_subscribe()
         logging.info("Webhook subscription initiated.")
 
@@ -63,8 +66,7 @@ def webhook():
     logging.info(f"Webhook Headers: ChannelID={channel_id}, ResourceID={resource_id}, State={resource_state}, Token={channel_token}, MsgNum={message_number}")
     logging.info(f"Webhook Body (usually empty): {request.data.decode('utf-8', errors='ignore')}")
 
-    if not webhook_check(message_number):
-        logging.info(f"Message number {message_number} has already been processed. Ignoring duplicate.")
+    if sync_check(message_number, 'request_message', 'last_message', 'last_number'):
         return jsonify(response_data), status_code
         
     # Authentification check
@@ -78,45 +80,7 @@ def webhook():
         logging.info(f"Webhook sync acknowledged for resource {resource_id}.")
         return jsonify({"status": "sync_acknowledged"}), 200
 
-    drive_service = get_drive_service()
-    
-    last_token = load_startpagetoken(resource_id, local, local_token_file=LOCAL_TOKEN_DB_FILE if local else None)
-        
-    try:
-        last_token = last_token[resource_id].get('token')
-    except KeyError:
-        pass
-
-    if not last_token:
-        logging.warning(f"No previous startPageToken found for resource {resource_id}. Attempting to retrieve the current token.")
-        start_page_token_response = drive_service.changes().getStartPageToken(supportsAllDrives=True).execute()
-        last_token = start_page_token_response.get('startPageToken')
-        save_startpagetoken(resource_id, last_token, local, local_token_file=LOCAL_TOKEN_DB_FILE if local else None) # Sauvegarde ce token initial pour les futures exécutions.
-        logging.info(f"Initial startPageToken retrieved and saved for {resource_id}: {last_token}")
-    
-    logging.info(f"Recovering changes from token: {last_token} for resource {resource_id}")
-        
-    # Check if the resource_id is a Shared Drive ID.
-    # Shared Drive IDs are typically 33 characters long.
-    is_shared_drive_resource = len(resource_id) == 33 
-
-    # Call the `changes().list()` method to get the actual list of changes.
-    results = drive_service.changes().list(
-        pageToken=last_token,
-        supportsAllDrives=True,
-        includeRemoved=True,
-        driveId=resource_id if is_shared_drive_resource else None, 
-        fields="nextPageToken,newStartPageToken,changes(fileId,file(name,parents,mimeType,trashed,shared,size))"
-    ).execute()
-
-    changes = results.get('changes', [])
-    new_start_page_token = results.get('newStartPageToken')
-
-    if new_start_page_token:
-        save_startpagetoken(resource_id, new_start_page_token, local, local_token_file=LOCAL_TOKEN_DB_FILE if local else None)
-        logging.info(f"startPageToken updated to : {new_start_page_token} for resource {resource_id}")
-
-    thread_args = (resource_id, resource_state, drive_service, changes, FILE_SAVE_PATH)
+    thread_args = (resource_id, resource_state, FILE_SAVE_PATH)
     thread = threading.Thread(target=gdrive_file_handler, args=thread_args)
     thread.start() # Start the thread
 
@@ -127,23 +91,15 @@ def webhook():
 if __name__ == '__main__':
     load_dotenv()
 
+    try:
+        firebase_admin.initialize_app()
+    except ValueError:
+        None
+
     FILE_SAVE_PATH = os.getcwd() + '/files/downloaded_files/' 
 
-    try:
-        from google.cloud import firestore
-        firestore_client = firestore.Client() 
-        local = False
-        logging.info("Firestore client initialized successfully.")
-    except ImportError:
-        USER_TO_IMPERSONATE = None
-        LOCAL_TOKEN_DB_FILE = './files/local_webhook_tokens.json'
-        drive_service_receiver = None
-        local = True
-        logging.info("Firestore client could not be imported. Using local JSON file for tokens.")
+    USER_TO_IMPERSONATE = None
+    drive_service_receiver = None
 
-    if local:
-        app.run(host="0.0.0.0", port=8080, debug=True)
-    else:
-        port = int(os.environ.get("PORT", 8080))
-        app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=8080, debug=True)
 

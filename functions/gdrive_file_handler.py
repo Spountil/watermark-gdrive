@@ -5,6 +5,8 @@ import os
 from ast import literal_eval
 from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
 from functions.watermark import Watermark
+from functions.webhook import get_drive_service
+from functions.gdrive_token import load_startpagetoken, save_startpagetoken
 
 
 def download_file(drive_service, file_id, destination_path=None, expected_file_size=None) -> bytes:
@@ -84,12 +86,49 @@ def upload_file(drive_service, new_file_name, local_file_path, new_mime_type, pa
         return None
     
 
-def gdrive_file_handler(resource_id, resource_state, drive_service, changes, FILE_SAVE_PATH):
+def gdrive_file_handler(resource_id, resource_state, FILE_SAVE_PATH):
     """
     Handle the asynchronous processing of Google Drive changes, and apply watermarks to images if criterias are met.
     """
     
     logging.info(f"Beginning asynchronous processing for resource: {resource_id}, state: {resource_state}")
+
+    drive_service = get_drive_service()
+
+    last_token = load_startpagetoken(resource_id)
+
+    if not last_token:
+        logging.warning(f"No previous startPageToken found for resource {resource_id}. Attempting to retrieve the current token.")
+        start_page_token_response = drive_service.changes().getStartPageToken(supportsAllDrives=True).execute()
+        last_token = start_page_token_response.get('startPageToken')
+        save_startpagetoken(resource_id, last_token) # Sauvegarde ce token initial pour les futures exécutions.
+        logging.info(f"Initial startPageToken retrieved and saved for {resource_id}: {last_token}")
+    
+    logging.info(f"Recovering changes from token: {last_token} for resource {resource_id}")
+        
+    # Check if the resource_id is a Shared Drive ID.
+    # Shared Drive IDs are typically 33 characters long.
+    is_shared_drive_resource = len(resource_id) == 33 
+
+    # Call the `changes().list()` method to get the actual list of changes.
+    results = drive_service.changes().list(
+        pageToken=last_token,
+        supportsAllDrives=True,
+        includeRemoved=True,
+        driveId=resource_id if is_shared_drive_resource else None, 
+        fields="nextPageToken,newStartPageToken,changes(fileId,file(name,parents,mimeType,trashed,shared,size))"
+    ).execute()
+
+    changes = results.get('changes', [])
+    new_start_page_token = results.get('newStartPageToken')
+
+    if last_token == new_start_page_token:
+        logging.info(f"No new changes detected for resource {resource_id} since the last token {last_token}.")
+        return
+
+    if new_start_page_token:
+        save_startpagetoken(resource_id, new_start_page_token)
+        logging.info(f"startPageToken updated to : {new_start_page_token} for resource {resource_id}")
 
     try:
 
@@ -99,9 +138,6 @@ def gdrive_file_handler(resource_id, resource_state, drive_service, changes, FIL
                     file_ids = json.load(f)
             else:
                 file_ids = []
-
-            # with open('files/response.json', 'w') as f:
-            #     json.dump(changes, f)
                 
             logging.info(f"Number of changes detected : {len(changes)}")
 
@@ -138,8 +174,10 @@ def gdrive_file_handler(resource_id, resource_state, drive_service, changes, FIL
                     # Check if the file is in the watched folder by comparing its parents with the FILE_ID environment variable.
                     if os.getenv('FILE_ID') in parents:
                         logging.info(f"File {file_info.get('name')} in a watched folder.")
+                        is_param = False
                     elif os.getenv('SETTING_FILE_ID') in parents:
                         logging.info(f"File {file_info.get('name')} is a settings file.")
+                        is_param = True
 
                         if file_info.get('name').endswith('.json'):
                             folder = '/files/settings/'
@@ -155,7 +193,6 @@ def gdrive_file_handler(resource_id, resource_state, drive_service, changes, FIL
                     logging.info(f"Changes in file/folder ID: {file_id}, Name: {file_info.get('name')}, Parents: {parents}, State: {'Deleted' if file_info.get('trashed') else 'Active'}, Size: {file_size} bytes")
 
                     path_file = FILE_SAVE_PATH + file_info.get('name')
-                    watermark = True
 
                     # Check if settings and logo files exist, if not, download them from Google Drive.
                     path_params = [os.getcwd() + '/files/settings/settings.json',
@@ -190,43 +227,57 @@ def gdrive_file_handler(resource_id, resource_state, drive_service, changes, FIL
 
                     if download:
                         logging.info(f"File {file_id} downloaded in memory. Size: {len(download)} bytes.")
-
-                        if watermark:
-                            logging.info(f"Adding the watermark on the file {file_info.get('name')}...")
-
-                            with open(os.getcwd() + '/files/settings/settings.json', 'r') as file:
-                                settings = json.load(file)
-
-                            wtmrk = Watermark(
-                                path=path_file,
-                                path_logo=os.getenv('LOGO_PATH'),
-                                colors=literal_eval(settings['colors']), 
-                                opacity=settings['opacity'] 
-                            )
-
-                            # Apply the watermark to the image.
-                            # Note: Make sure the image is in a compatible format (e.g., PNG) for the PIL package.
-                            new_file_path = wtmrk.img_watermark()
-
-                            logging.info(f"Watermark applied ot the file {file_info.get('name')}.")
-
-                            logging.info(f"Upload in folder id {os.getenv('RESULT_FILE_ID')}.")
-                            reply = upload_file(
-                                drive_service,
-                                new_file_name=new_file_path.split('/')[-1],
-                                local_file_path=new_file_path,
-                                new_mime_type='image/png',
-                                parent_folder_id=os.getenv('RESULT_FILE_ID')
-                            )
-
-                            os.remove(new_file_path)  # Delete the temporary file after upload.
-                            os.remove(path_file)  # Delete the original downloaded file after processing.
-
                     else:
                         logging.error(f"Downloading of the file {file_id} failed.")
 
                 else:
                     logging.info(f"Changes in the folder/file ID: {file_id} (deleted or not found).")
+
+            for file in os.listdir(FILE_SAVE_PATH):
+                if file.startswith('.') or file.endswith('_mrkd.png'):
+                    continue
+
+                logging.info(f"Adding the watermark on the file {file}...")
+
+                with open(os.getcwd() + '/files/settings/settings.json', 'r') as f:
+                    settings = json.load(f)
+
+                path_file = FILE_SAVE_PATH + file
+
+                wtmrk = Watermark(
+                    path=path_file,
+                    path_logo=os.getenv('LOGO_PATH'),
+                    colors=literal_eval(settings['colors']), 
+                    opacity=settings['opacity'] 
+                    )
+
+                # Apply the watermark to the image.
+                # Note: Make sure the image is in a compatible format (e.g. HEIC, PNG, etc.) for the PIL package.
+                new_file_path = wtmrk.img_watermark()
+
+                logging.info(f"Watermark applied ot the file {file_info.get('name')}.")
+
+                os.remove(path_file)  # Delete the file in the folder
+                logging.info(f"Original file {file} deleted after watermarking.")
+
+            for file_mrkd in os.listdir(FILE_SAVE_PATH):
+                if file_mrkd.startswith('.') or not file_mrkd.endswith('_mrkd.png'):
+                    continue
+
+                path_file = FILE_SAVE_PATH + file_mrkd
+
+                logging.info(f"Upload in folder id {os.getenv('RESULT_FILE_ID')}.")
+                reply = upload_file(
+                    drive_service,
+                    new_file_name=path_file.split('/')[-1],
+                    local_file_path=path_file,
+                    new_mime_type='image/png',
+                    parent_folder_id=os.getenv('RESULT_FILE_ID')
+                    )
+
+                os.remove(path_file)  # Delete the file in the folder
+                logging.info(f"Watermarked file {file_mrkd} deleted after upload.")
+                
         else:
             logging.info("No significant changes detected by changes.list() despite notification from the webhook.")
 
