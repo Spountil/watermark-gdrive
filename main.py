@@ -2,20 +2,22 @@ from flask import Flask, request, jsonify
 import os
 import sys
 import logging
+import json
 from dotenv import load_dotenv
 import threading
 from functions.webhook import get_drive_service
 from functions.gdrive_token import load_startpagetoken, save_startpagetoken
 from functions.gdrive_file_handler import gdrive_file_handler
 from webhook_subscribe import webhook_subscribe
+from functions.webhook_check import webhook_check
 
-root = logging.getLogger()
-root.setLevel(logging.DEBUG)
-handler = logging.StreamHandler(sys.stdout)
-handler.setLevel(logging.DEBUG)
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-handler.setFormatter(formatter)
-root.addHandler(handler)
+# root = logging.getLogger()
+# root.setLevel(logging.DEBUG)
+# handler = logging.StreamHandler(sys.stdout)
+# handler.setLevel(logging.DEBUG)
+# formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+# handler.setFormatter(formatter)
+# root.addHandler(handler)
 
 app = Flask(__name__)
 
@@ -57,10 +59,14 @@ def webhook():
     resource_state = request.headers.get('X-Goog-Resource-State') # State of the resource (ex: 'change', 'sync', 'trash').
     channel_token = request.headers.get('X-Goog-Channel-Token') # Secret token given when subscribing to the webhook.
     message_number = request.headers.get('X-Goog-Message-Number') # Number of the message in the channel.
-    
+
     logging.info(f"Webhook Headers: ChannelID={channel_id}, ResourceID={resource_id}, State={resource_state}, Token={channel_token}, MsgNum={message_number}")
     logging.info(f"Webhook Body (usually empty): {request.data.decode('utf-8', errors='ignore')}")
 
+    if not webhook_check(message_number):
+        logging.info(f"Message number {message_number} has already been processed. Ignoring duplicate.")
+        return jsonify(response_data), status_code
+        
     # Authentification check
     if not os.environ.get('CHANNEL_TOKEN') or channel_token != os.environ.get('CHANNEL_TOKEN'):
         logging.error(f"Security error: X-Goog-Channel-Token incorrect. Expected: '{os.environ.get('CHANNEL_TOKEN')}', Received: '{channel_token}'")
