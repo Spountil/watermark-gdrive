@@ -17,6 +17,7 @@ DRIVE_SHARED_ID = None
 
 load_dotenv()
 
+
 def load_credentials():
     file_name = os.getenv('TOKEN_PATH')
 
@@ -36,6 +37,7 @@ def load_credentials():
         json.dump(creds, f)
 
     return file_name
+
 
 def get_drive_service():
     logging.info("Initialisation of Google Drive service for the receiver.")

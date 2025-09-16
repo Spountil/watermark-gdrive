@@ -6,15 +6,15 @@ import sys
 from functions.webhook import get_drive_service, create_drive_changes_webhook_channel
 from functions.gdrive_token import get_current_start_page_token
 
-root = logging.getLogger()
-root.setLevel(logging.DEBUG)
-handler = logging.StreamHandler(sys.stdout)
-handler.setLevel(logging.DEBUG)
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-handler.setFormatter(formatter)
-root.addHandler(handler)
-
 DRIVE_SHARED_ID = None
+
+# root = logging.getLogger()
+# root.setLevel(logging.DEBUG)
+# handler = logging.StreamHandler(sys.stdout)
+# handler.setLevel(logging.DEBUG)
+# formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+# handler.setFormatter(formatter)
+# root.addHandler(handler)
 
 def webhook_subscribe():
     drive_service = get_drive_service()
@@ -38,6 +38,7 @@ def webhook_subscribe():
             
     else:
         logging.info("Cannot get startPageToken. Webhook was not created.")
+
 
 if __name__ == "__main__":
     load_dotenv()
