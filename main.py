@@ -66,7 +66,7 @@ def webhook():
     logging.info(f"Webhook Headers: ChannelID={channel_id}, ResourceID={resource_id}, State={resource_state}, Token={channel_token}, MsgNum={message_number}")
     logging.info(f"Webhook Body (usually empty): {request.data.decode('utf-8', errors='ignore')}")
 
-    if sync_check(message_number, 'request_message', 'last_message', 'last_number'):
+    if sync_check(message_number, 'request_message', channel_id, 'last_number'):
         return jsonify(response_data), status_code
         
     # Authentification check
