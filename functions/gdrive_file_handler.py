@@ -167,18 +167,6 @@ def gdrive_file_handler(resource_id, resource_state, FILE_SAVE_PATH):
                     logging.info(f"Changed ignored for the file ID: {file_id} (deleted or non-image).")
                     continue
 
-                if file_id in file_ids:
-                    logging.info(f"Changes already handled for file ID: {file_id}. Ignored.")
-                    continue
-                else:
-                    file_ids.append(file_id)
-                    logging.info(f"Handling changes for file ID: {file_id}")
-
-                    # Use a list of the previously processed file IDs to avoid reprocessing, especially in case of multiple changes.
-                    file_ids = file_ids[-50:]  # Limite the size of the file_ids list to the last 50 processed files.
-
-                    db.collection("file_treated").document("file_ids").set({'file_ids': file_ids})
-
                 if file_info:
                     parents = file_info.get('parents', [])
                     file_size = int(file_info.get('size', 0))
@@ -187,6 +175,19 @@ def gdrive_file_handler(resource_id, resource_state, FILE_SAVE_PATH):
                     if os.getenv('FILE_ID') in parents:
                         logging.info(f"File {file_info.get('name')} in a watched folder.")
                         is_param = False
+
+                        if file_id in file_ids:
+                            logging.info(f"Changes already handled for file ID: {file_id}. Ignored.")
+                            continue
+                        else:
+                            file_ids.append(file_id)
+                            logging.info(f"Handling changes for file ID: {file_id}")
+
+                            # Use a list of the previously processed file IDs to avoid reprocessing, especially in case of multiple changes.
+                            file_ids = file_ids[-50:]  # Limite the size of the file_ids list to the last 50 processed files.
+
+                            db.collection("file_treated").document("file_ids").set({'file_ids': file_ids})
+
                     elif os.getenv('SETTING_FILE_ID') in parents:
                         logging.info(f"File {file_info.get('name')} is a settings file.")
                         is_param = True
