@@ -9,6 +9,8 @@ from dotenv import load_dotenv
 import logging
 import datetime
 import time
+import firebase_admin
+from firebase_admin import firestore
 
 SCOPES = ['https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/auth/drive.readonly']
 
@@ -17,39 +19,51 @@ DRIVE_SHARED_ID = None
 
 load_dotenv()
 
+try:
+    firebase_admin.initialize_app()
+except ValueError:
+    None
+
+db = firestore.client()
+
 
 def load_credentials():
-    file_name = os.getenv('TOKEN_PATH')
+    creds = db.collection("credentials").document("user_credentials").get().to_dict()
 
-    creds ={
-        "token": os.getenv('TOKEN'),
-        "refresh_token": os.getenv('REFRESH_TOKEN'),
-        "token_uri": os.getenv('TOKEN_URI'),
-        "client_id": os.getenv('CLIENT_ID'), 
-        "client_secret": os.getenv('CLIENT_SECRET'),
-        "scopes": SCOPES, 
-        "universe_domain": os.getenv('UNIVERSE_DOMAIN'), 
-        "account": "", 
-        "expiry": os.getenv('EXPIRY')
-    }   
-    
-    with open(file_name, 'w') as f:
-        json.dump(creds, f)
+    if creds is None or creds == {}:
+        logging.info(f"Error loading credentials from Firestore - {creds}")
 
-    return file_name
+        creds ={
+            "token": os.getenv('TOKEN'),
+            "refresh_token": os.getenv('REFRESH_TOKEN'),
+            "token_uri": os.getenv('TOKEN_URI'),
+            "client_id": os.getenv('CLIENT_ID'), 
+            "client_secret": os.getenv('CLIENT_SECRET'),
+            "scopes": SCOPES, 
+            "universe_domain": os.getenv('UNIVERSE_DOMAIN'), 
+            "account": "", 
+            "expiry": os.getenv('EXPIRY')
+        }   
+
+    return creds
 
 
 def get_drive_service():
+    
     logging.info("Initialisation of Google Drive service for the receiver.")
-    creds = load_credentials()
+
+    try:
+        credentials = load_credentials()
+    except Exception as e:
+        logging.info(f"Could not load credentials: {e}")
+        credentials = None
+
     # The file token.json stores the user's access and refresh tokens.
-    if os.path.exists(os.getenv('TOKEN_PATH')):
-        try:
-            creds = Credentials.from_authorized_user_file(os.getenv('TOKEN_PATH'), SCOPES)
-        except Exception as e:
-            logging.info(f"Error loading credentials from {os.getenv('TOKEN_PATH')}: {e}")
-            logging.info("You may need to delete the token.json file and re-authenticate.")
-            return None
+    try:
+        creds = Credentials.from_authorized_user_info(credentials, SCOPES)
+    except Exception as e:
+        logging.info(f"Error loading credentials: {e} - {credentials}")
+        return None
 
     # If there are no (valid) credentials available, let the user log in.
     if not creds or not creds.valid:
@@ -69,10 +83,10 @@ def get_drive_service():
             flow = InstalledAppFlow.from_client_secrets_file(os.getenv('SERCRET_FILE_PATH'), SCOPES)
             creds = flow.run_local_server(port=0)
         
-        # Save the credentials for the next run
-        with open(os.getenv('TOKEN_PATH'), 'w') as token:
-            token.write(creds.to_json())
-            logging.info(f"Credentials saved to {os.getenv('TOKEN_PATH')}")
+        creds_to_upload = json.loads(creds.to_json())
+
+        db.collection("credentials").document("user_credentials").set(creds_to_upload)
+        logging.info(f"Credentials saved to Firestore.")
 
     drive_service_receiver = build('drive', 'v3', credentials=creds)
 
