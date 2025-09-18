@@ -3,10 +3,19 @@ import io
 import json
 import os
 from ast import literal_eval
+import firebase_admin
+from firebase_admin import firestore
 from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
 from functions.watermark import Watermark
 from functions.webhook import get_drive_service
 from functions.gdrive_token import load_startpagetoken, save_startpagetoken
+
+try:
+    firebase_admin.initialize_app()
+except ValueError:
+    None
+
+db = firestore.client()
 
 
 def download_file(drive_service, file_id, destination_path=None, expected_file_size=None) -> bytes:
@@ -133,11 +142,14 @@ def gdrive_file_handler(resource_id, resource_state, FILE_SAVE_PATH):
     try:
 
         if changes:
-            if os.path.exists('./files/file_ids.json'):
-                with open('./files/file_ids.json', 'r') as f:
-                    file_ids = json.load(f)
-            else:
+
+            file_ids = db.collection("file_treated").document("file_ids").get().to_dict()
+
+            if file_ids is None or file_ids == {}:
+                logging.error(f"Error loading credentials from Firestore - {file_ids}")
                 file_ids = []
+            else:
+                file_ids = file_ids.get('file_ids')
                 
             logging.info(f"Number of changes detected : {len(changes)}")
 
@@ -164,8 +176,8 @@ def gdrive_file_handler(resource_id, resource_state, FILE_SAVE_PATH):
 
                     # Use a list of the previously processed file IDs to avoid reprocessing, especially in case of multiple changes.
                     file_ids = file_ids[-50:]  # Limite the size of the file_ids list to the last 50 processed files.
-                    with open('./files/file_ids.json', 'w') as f:
-                        json.dump(file_ids, f)
+
+                    db.collection("file_treated").document("file_ids").set({'file_ids': file_ids})
 
                 if file_info:
                     parents = file_info.get('parents', [])
