@@ -2,6 +2,7 @@ import logging
 import io
 import json
 import os
+import time
 from ast import literal_eval
 import firebase_admin
 from firebase_admin import firestore
@@ -95,10 +96,12 @@ def upload_file(drive_service, new_file_name, local_file_path, new_mime_type, pa
         return None
     
 
-def gdrive_file_handler(resource_id, resource_state, FILE_SAVE_PATH):
+def gdrive_file_handler(resource_id, resource_state, FILE_SAVE_PATH, message_number):
     """
     Handle the asynchronous processing of Google Drive changes, and apply watermarks to images if criterias are met.
     """
+
+    start = time.time()
     
     logging.info(f"Beginning asynchronous processing for resource: {resource_id}, state: {resource_state}")
 
@@ -166,6 +169,8 @@ def gdrive_file_handler(resource_id, resource_state, FILE_SAVE_PATH):
                 if (file_info.get('trashed')) or (not 'image/' in file_info.get('mimeType')):
                     logging.info(f"Changed ignored for the file ID: {file_id} (deleted or non-image).")
                     continue
+
+                nb_file_downloaded = 0
 
                 if file_info:
                     parents = file_info.get('parents', [])
@@ -240,11 +245,15 @@ def gdrive_file_handler(resource_id, resource_state, FILE_SAVE_PATH):
 
                     if download:
                         logging.info(f"File {file_id} downloaded in memory. Size: {len(download)} bytes.")
+
+                        nb_file_downloaded += 1
                     else:
                         logging.error(f"Downloading of the file {file_id} failed.")
 
                 else:
                     logging.info(f"Changes in the folder/file ID: {file_id} (deleted or not found).")
+
+            nb_file_to_mrkd = 0
 
             for file in os.listdir(FILE_SAVE_PATH):
                 if file.startswith('.') or file.endswith('_mrkd.png'):
@@ -273,6 +282,10 @@ def gdrive_file_handler(resource_id, resource_state, FILE_SAVE_PATH):
                 os.remove(path_file)  # Delete the file in the folder
                 logging.info(f"Original file {file} deleted after watermarking.")
 
+                nb_file_to_mrkd += 1
+
+            nb_file_uploaded = 0
+
             for file_mrkd in os.listdir(FILE_SAVE_PATH):
                 if file_mrkd.startswith('.') or not file_mrkd.endswith('_mrkd.png'):
                     continue
@@ -290,6 +303,12 @@ def gdrive_file_handler(resource_id, resource_state, FILE_SAVE_PATH):
 
                 os.remove(path_file)  # Delete the file in the folder
                 logging.info(f"Watermarked file {file_mrkd} deleted after upload.")
+
+                nb_file_uploaded += 1
+
+            end = time.time()
+            timing = end - start
+            db.collection("log_time").document(resource_id).set({'Processing time': timing, 'Number of files downloaded': nb_file_downloaded, 'Number of files watermarked': nb_file_to_mrkd, 'Number of files uploaded': nb_file_uploaded}, merge=True)
                 
         else:
             logging.info("No significant changes detected by changes.list() despite notification from the webhook.")

@@ -5,6 +5,7 @@ import logging
 from dotenv import load_dotenv
 import threading
 import firebase_admin
+from firebase_admin import firestore
 from functions.gdrive_file_handler import gdrive_file_handler
 from functions.webhook_check import sync_check
 from webhook_subscribe import webhook_subscribe
@@ -25,6 +26,13 @@ SCOPES = ['https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/a
 
 drive_service_receiver = None
 
+try:
+    firebase_admin.initialize_app()
+except ValueError:
+    None
+
+db = firestore.client()
+
 
 @app.route('/', methods=['GET'])
 def landing_page():
@@ -43,9 +51,11 @@ def landing_page():
         Subscribing to the webhook with the token.
         """
     else:
+        file_ids = db.collection("log_time").get().to_dict()
+
         name = f"""
-        Received a GET request on the root endpoint.
-        Hello World.
+        Logs time of files processed:
+        {file_ids}
         """
 
     return name, 200
@@ -80,7 +90,7 @@ def webhook():
         logging.info(f"Webhook sync acknowledged for resource {resource_id}.")
         return jsonify({"status": "sync_acknowledged"}), 200
 
-    thread_args = (resource_id, resource_state, FILE_SAVE_PATH)
+    thread_args = (resource_id, resource_state, FILE_SAVE_PATH, message_number)
     thread = threading.Thread(target=gdrive_file_handler, args=thread_args)
     thread.start() # Start the thread
 
