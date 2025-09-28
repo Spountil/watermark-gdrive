@@ -310,7 +310,7 @@ def gdrive_file_handler(resource_id, resource_state, FILE_SAVE_PATH, message_num
                 logging.info(f"Processing summary for resource {resource_id}: Downloaded: {nb_file_downloaded}, Watermarked: {nb_file_to_mrkd}, Uploaded: {nb_file_uploaded}")
                 end = time.time()
                 timing = end - start
-                db.collection("log_time").document(resource_id).set({'Processing time': timing, 'Number of files downloaded': nb_file_downloaded, 'Number of files watermarked': nb_file_to_mrkd, 'Number of files uploaded': nb_file_uploaded}, merge=True)
+                db.collection("log_time").document(message_number).set({'Processing time': timing, 'Number of files downloaded': nb_file_downloaded, 'Number of files watermarked': nb_file_to_mrkd, 'Number of files uploaded': nb_file_uploaded}, merge=True)
             except Exception as e:
                 logging.error(f"Error logging processing summary to Firestore: {e}", exc_info=True)   
             
