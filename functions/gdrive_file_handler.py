@@ -2,6 +2,7 @@ import logging
 import io
 import json
 import os
+import time
 from ast import literal_eval
 import firebase_admin
 from firebase_admin import firestore
@@ -95,10 +96,12 @@ def upload_file(drive_service, new_file_name, local_file_path, new_mime_type, pa
         return None
     
 
-def gdrive_file_handler(resource_id, resource_state, FILE_SAVE_PATH):
+def gdrive_file_handler(resource_id, resource_state, FILE_SAVE_PATH, message_number):
     """
     Handle the asynchronous processing of Google Drive changes, and apply watermarks to images if criterias are met.
     """
+
+    start = time.time()
     
     logging.info(f"Beginning asynchronous processing for resource: {resource_id}, state: {resource_state}")
 
@@ -290,6 +293,10 @@ def gdrive_file_handler(resource_id, resource_state, FILE_SAVE_PATH):
 
                 os.remove(path_file)  # Delete the file in the folder
                 logging.info(f"Watermarked file {file_mrkd} deleted after upload.")
+
+            end = time.time()
+            timing = end - start
+            db.collection("log_time").document(resource_id).set({'Processing time': timing})
                 
         else:
             logging.info("No significant changes detected by changes.list() despite notification from the webhook.")
