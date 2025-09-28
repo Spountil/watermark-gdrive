@@ -51,11 +51,13 @@ def landing_page():
         Subscribing to the webhook with the token.
         """
     else:
-        file_ids = db.collection("log_time").get().to_dict()
+        log_times = db.collection("log_time").stream()
+
+        log_times_list = [log.to_dict() for log in log_times]
 
         name = f"""
         Logs time of files processed:
-        {file_ids}
+        {log_times_list}
         """
 
     return name, 200
