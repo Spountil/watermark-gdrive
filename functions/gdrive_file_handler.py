@@ -170,6 +170,8 @@ def gdrive_file_handler(resource_id, resource_state, FILE_SAVE_PATH, message_num
                     logging.info(f"Changed ignored for the file ID: {file_id} (deleted or non-image).")
                     continue
 
+                nb_file_downloaded = 0
+
                 if file_info:
                     parents = file_info.get('parents', [])
                     file_size = int(file_info.get('size', 0))
@@ -243,11 +245,15 @@ def gdrive_file_handler(resource_id, resource_state, FILE_SAVE_PATH, message_num
 
                     if download:
                         logging.info(f"File {file_id} downloaded in memory. Size: {len(download)} bytes.")
+
+                        nb_file_downloaded += 1
                     else:
                         logging.error(f"Downloading of the file {file_id} failed.")
 
                 else:
                     logging.info(f"Changes in the folder/file ID: {file_id} (deleted or not found).")
+
+            nb_file_to_mrkd = 0
 
             for file in os.listdir(FILE_SAVE_PATH):
                 if file.startswith('.') or file.endswith('_mrkd.png'):
@@ -276,6 +282,10 @@ def gdrive_file_handler(resource_id, resource_state, FILE_SAVE_PATH, message_num
                 os.remove(path_file)  # Delete the file in the folder
                 logging.info(f"Original file {file} deleted after watermarking.")
 
+                nb_file_to_mrkd += 1
+
+            nb_file_uploaded = 0
+
             for file_mrkd in os.listdir(FILE_SAVE_PATH):
                 if file_mrkd.startswith('.') or not file_mrkd.endswith('_mrkd.png'):
                     continue
@@ -294,9 +304,11 @@ def gdrive_file_handler(resource_id, resource_state, FILE_SAVE_PATH, message_num
                 os.remove(path_file)  # Delete the file in the folder
                 logging.info(f"Watermarked file {file_mrkd} deleted after upload.")
 
+                nb_file_uploaded += 1
+
             end = time.time()
             timing = end - start
-            db.collection("log_time").document(resource_id).set({'Processing time': timing})
+            db.collection("log_time").document(resource_id).set({'Processing time': timing, 'Number of files downloaded': nb_file_downloaded, 'Number of files watermarked': nb_file_to_mrkd, 'Number of files uploaded': nb_file_uploaded}, merge=True)
                 
         else:
             logging.info("No significant changes detected by changes.list() despite notification from the webhook.")
