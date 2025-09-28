@@ -157,7 +157,7 @@ def gdrive_file_handler(resource_id, resource_state, FILE_SAVE_PATH, message_num
             logging.info(f"Number of changes detected : {len(changes)}")
 
             nb_file_downloaded = 0
-            
+
             for change in changes:
                 file_id = change.get('fileId')
                 file_info = change.get('file')
@@ -306,12 +306,14 @@ def gdrive_file_handler(resource_id, resource_state, FILE_SAVE_PATH, message_num
 
                 nb_file_uploaded += 1
 
-            if nb_file_downloaded or nb_file_to_mrkd or nb_file_uploaded:
+            try:
                 logging.info(f"Processing summary for resource {resource_id}: Downloaded: {nb_file_downloaded}, Watermarked: {nb_file_to_mrkd}, Uploaded: {nb_file_uploaded}")
                 end = time.time()
                 timing = end - start
                 db.collection("log_time").document(resource_id).set({'Processing time': timing, 'Number of files downloaded': nb_file_downloaded, 'Number of files watermarked': nb_file_to_mrkd, 'Number of files uploaded': nb_file_uploaded}, merge=True)
-                
+            except Exception as e:
+                logging.error(f"Error logging processing summary to Firestore: {e}", exc_info=True)   
+            
         else:
             logging.info("No significant changes detected by changes.list() despite notification from the webhook.")
 
