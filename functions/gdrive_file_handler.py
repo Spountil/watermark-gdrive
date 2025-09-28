@@ -156,6 +156,8 @@ def gdrive_file_handler(resource_id, resource_state, FILE_SAVE_PATH, message_num
                 
             logging.info(f"Number of changes detected : {len(changes)}")
 
+            nb_file_downloaded = 0
+            
             for change in changes:
                 file_id = change.get('fileId')
                 file_info = change.get('file')
@@ -169,8 +171,6 @@ def gdrive_file_handler(resource_id, resource_state, FILE_SAVE_PATH, message_num
                 if (file_info.get('trashed')) or (not 'image/' in file_info.get('mimeType')):
                     logging.info(f"Changed ignored for the file ID: {file_id} (deleted or non-image).")
                     continue
-
-                nb_file_downloaded = 0
 
                 if file_info:
                     parents = file_info.get('parents', [])
