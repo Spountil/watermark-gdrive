@@ -19,6 +19,7 @@ The idea was mainly to learn and understand how to work with APIs, HTTP requests
 
 <br/>
 
-![Image](/watermark-gdrive/watermark-gdrive.drawio.png)
+![Image](https://github.com/Spountil/watermark-gdrive/blob/main/watermark-gdrive.drawio.png)
+
 
 
